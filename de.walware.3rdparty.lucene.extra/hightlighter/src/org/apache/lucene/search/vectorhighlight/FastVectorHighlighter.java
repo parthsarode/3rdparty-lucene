@@ -19,19 +19,41 @@ package org.apache.lucene.search.vectorhighlight;
 
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.highlight.Encoder;
+import org.apache.lucene.search.vectorhighlight.FieldFragList.WeightedFragInfo;
+import org.apache.lucene.search.vectorhighlight.FieldPhraseList.WeightedPhraseInfo;
+import org.apache.lucene.search.vectorhighlight.FieldPhraseList.WeightedPhraseInfo.Toffs;
+
 
 /**
  * Another highlighter implementation.
  *
  */
 public class FastVectorHighlighter {
+  
   public static final boolean DEFAULT_PHRASE_HIGHLIGHT = true;
   public static final boolean DEFAULT_FIELD_MATCH = true;
+
+
+  private static String getTag(final String[] tags, final int num) {
+    return tags[num % tags.length];
+  }
+  
+  private static int countMatches(final List<WeightedFragInfo> fragInfos) {
+    int matchCount= 0;
+    for (int j = 0; j < fragInfos.size(); j++) {
+      matchCount+= fragInfos.get(j).getSubInfos().size();
+    }
+    return matchCount;
+  }
+
+
   private final boolean phraseHighlight;
   private final boolean fieldMatch;
   private final FragListBuilder fragListBuilder;
@@ -222,6 +244,69 @@ public class FastVectorHighlighter {
   }
 
   /**
+   * A simple aternative to {@link SingleFragListBuilder} + {@link SimpleFragmentsBuilder} to get
+   * the highlighted complete field value.
+   */
+  public String getComplete( final FieldQuery fieldQuery, final IndexReader reader, final int docId,
+      final String fieldName,
+      final String[] preTags, final String[] postTags, final Encoder encoder ) throws IOException {
+    final FieldTermStack fieldTermStack= new FieldTermStack( reader, docId, fieldName, fieldQuery );
+    final FieldPhraseList fieldPhraseList= new FieldPhraseList( fieldTermStack, fieldQuery );
+    final String src= reader.document(docId).get(fieldName);
+    int srcIndex= 0;
+    final StringBuilder sb= new StringBuilder(src.length() + fieldPhraseList.phraseList.size() * 32);
+    for (final WeightedPhraseInfo phraseInfo : fieldPhraseList.phraseList) {
+      for (final Toffs to : phraseInfo.getTermsOffsets()) {
+        sb.append(encoder.encodeText(src.substring(srcIndex, to.getStartOffset())));
+        sb.append(getTag(preTags, phraseInfo.getSeqnum()));
+        sb.append(encoder.encodeText(src.substring(to.getStartOffset(), to.getEndOffset())));
+        sb.append(getTag(postTags, phraseInfo.getSeqnum()));
+        srcIndex= to.getEndOffset();
+      }
+    }
+    sb.append(encoder.encodeText(src.substring(srcIndex)));
+    return sb.toString();
+  }
+
+  public final String getBestFragment( final FieldQuery fieldQuery, IndexReader reader, int docId,
+      String fieldName, int fragCharSize,
+      String[] preTags, String[] postTags, Encoder encoder,
+      final AtomicInteger counter ) throws IOException {
+    final FieldFragList fieldFragList= getFieldFragList( this.fragListBuilder,
+        fieldQuery, reader, docId, fieldName, fragCharSize );
+    
+    if (counter != null) {
+      final int matchCount= countMatches(fieldFragList.getFragInfos());
+      if (matchCount == 0) {
+        return null;
+      }
+      counter.addAndGet(matchCount);
+    }
+    
+    return this.fragmentsBuilder.createFragment( reader, docId, fieldName, fieldFragList,
+        preTags, postTags, encoder );
+  }
+
+  public final String[] getBestFragments( final FieldQuery fieldQuery, IndexReader reader, int docId,
+      String fieldName, int fragCharSize, int maxNumFragments,
+      String[] preTags, String[] postTags, Encoder encoder,
+      final AtomicInteger counter ) throws IOException {
+    final FieldFragList fieldFragList= getFieldFragList( this.fragListBuilder,
+        fieldQuery, reader, docId, fieldName, fragCharSize );
+    
+    if (counter != null) {
+      final int matchCount= countMatches(fieldFragList.getFragInfos());
+      if (matchCount == 0) {
+        return null;
+      }
+      counter.addAndGet(matchCount);
+    }
+    
+    return this.fragmentsBuilder.createFragments( reader, docId, fieldName, fieldFragList, maxNumFragments,
+        preTags, postTags, encoder );
+  }
+
+  /**
    * Build a FieldFragList for one field.
    */
   private FieldFragList getFieldFragList( FragListBuilder fragListBuilder,
@@ -275,4 +360,5 @@ public class FastVectorHighlighter {
    * The default is unlimited (Integer.MAX_VALUE).
    */
   public void setPhraseLimit (int phraseLimit) { this.phraseLimit = phraseLimit; }
+  
 }

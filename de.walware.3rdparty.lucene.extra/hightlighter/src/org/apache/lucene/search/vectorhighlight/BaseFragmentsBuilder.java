@@ -175,11 +175,10 @@ public abstract class BaseFragmentsBuilder implements FragmentsBuilder {
     int srcIndex = 0;
     for( SubInfo subInfo : fragInfo.getSubInfos() ){
       for( Toffs to : subInfo.getTermsOffsets() ){
-        fragment
-          .append( encoder.encodeText( src.substring( srcIndex, to.getStartOffset() - modifiedStartOffset[0] ) ) )
-          .append( getPreTag( preTags, subInfo.getSeqnum() ) )
-          .append( encoder.encodeText( src.substring( to.getStartOffset() - modifiedStartOffset[0], to.getEndOffset() - modifiedStartOffset[0] ) ) )
-          .append( getPostTag( postTags, subInfo.getSeqnum() ) );
+        fragment.append( encoder.encodeText( src.substring( srcIndex, to.getStartOffset() - modifiedStartOffset[0] ) ) );
+        fragment.append( getPreTag( preTags, subInfo.getSeqnum() ) );
+        fragment.append( encoder.encodeText( src.substring( to.getStartOffset() - modifiedStartOffset[0], to.getEndOffset() - modifiedStartOffset[0] ) ) );
+        fragment.append( getPostTag( postTags, subInfo.getSeqnum() ) );
         srcIndex = to.getEndOffset() - modifiedStartOffset[0];
       }
     }
