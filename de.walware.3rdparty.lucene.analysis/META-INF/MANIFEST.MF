@@ -1,0 +1,9 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-SymbolicName: org.apache.lucene.analysis
+Bundle-Version: 4.7.2.qualifier
+Bundle-Vendor: WalWare.de
+Bundle-Name: Apache Lucene - Analysis (Analysis Common)
+Bundle-ActivationPolicy: lazy
+Bundle-RequiredExecutionEnvironment: JavaSE-1.6
+Require-Bundle: org.apache.lucene.core;bundle-version="[4.7.2,4.8.0)"

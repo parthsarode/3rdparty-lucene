@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feature
+      id="de.walware.3rdparty.lucene"
+      label="Apache Lucene"
+      version="4.7.2.qualifier"
+      provider-name="WalWare.de"
+      license-feature="de.walware.opensource.license"
+      license-feature-version="1.0.0">
+
+   <description url="http://www.apache.com/lucene">
+      Apache Lucene, text search engine library by the Apache Software Foundation.
+   </description>
+
+   <copyright>
+      Copyright (c) 2014 The Apache Software Foundation and others. All rights reserved.
+   </copyright>
+
+   <license url="%license_url">
+      %license_text
+   </license>
+
+   <plugin
+         id="org.apache.lucene.core"
+         download-size="0"
+         install-size="0"
+         version="0.0.0"
+         unpack="false"/>
+   <plugin
+         id="org.apache.lucene.analysis"
+         download-size="0"
+         install-size="0"
+         version="0.0.0"
+         unpack="false"/>
+   
+   <plugin
+         id="de.walware.3rdparty.lucene.extra"
+         download-size="0"
+         install-size="0"
+         version="0.0.0"
+         unpack="false"/>
+
+</feature>
