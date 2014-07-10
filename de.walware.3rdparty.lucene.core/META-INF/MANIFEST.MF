@@ -5,7 +5,7 @@ Bundle-Version: 4.7.2.qualifier
 Bundle-Vendor: WalWare.de
 Bundle-Name: Apache Lucene - Core
 Bundle-ActivationPolicy: lazy
-Bundle-RequiredExecutionEnvironment: JavaSE-1.6
+Bundle-RequiredExecutionEnvironment: JavaSE-1.7
 Export-Package: org.apache.lucene;version="4.7.2",
  org.apache.lucene.analysis;version="4.7.2",
  org.apache.lucene.analysis.tokenattributes;version="4.7.2",
