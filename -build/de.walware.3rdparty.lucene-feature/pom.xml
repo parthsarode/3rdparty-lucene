@@ -7,7 +7,7 @@
 	<parent>
 		<groupId>de.walware.3rdparty</groupId>
 		<artifactId>3rdparty-lucene</artifactId>
-		<version>4.7-SNAPSHOT</version>
+		<version>4.10-SNAPSHOT</version>
 	</parent>
 	
 	<groupId>de.walware.3rdparty-packaging</groupId>
