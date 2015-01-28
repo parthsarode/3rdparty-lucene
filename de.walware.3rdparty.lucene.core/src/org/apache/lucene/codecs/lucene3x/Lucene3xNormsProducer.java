@@ -33,6 +33,7 @@ import org.apache.lucene.index.IndexFileNames;
 import org.apache.lucene.index.NumericDocValues;
 import org.apache.lucene.index.SegmentInfo;
 import org.apache.lucene.index.SortedDocValues;
+import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
@@ -41,6 +42,7 @@ import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.lucene.util.StringHelper;
+import org.apache.lucene.util.Version;
 
 /**
  * Reads Lucene 3.x norms format and exposes it via DocValues API
@@ -59,7 +61,7 @@ class Lucene3xNormsProducer extends DocValuesProducer {
   /** Extension of separate norms file */
   static final String SEPARATE_NORMS_EXTENSION = "s";
   
-  final Map<String,NormsDocValues> norms = new HashMap<String,NormsDocValues>();
+  final Map<String,NormsDocValues> norms = new HashMap<>();
   // any .nrm or .sNN files we have open at any time.
   // TODO: just a list, and double-close() separate norms files?
   final Set<IndexInput> openFiles = Collections.newSetFromMap(new IdentityHashMap<IndexInput,Boolean>());
@@ -105,9 +107,9 @@ class Lucene3xNormsProducer extends DocValuesProducer {
             // and don't need to do the sketchy file size check. otherwise, we check 
             // if the size is exactly equal to maxDoc to detect a headerless file.
             // NOTE: remove this check in Lucene 5.0!
-            String version = info.getVersion();
+            Version version = info.getVersion();
             final boolean isUnversioned = 
-                (version == null || StringHelper.getVersionComparator().compare(version, "3.2") < 0)
+                (version == null || Version.LUCENE_3_2_0.onOrAfter(version))
                 && normInput.length() == maxdoc;
             if (isUnversioned) {
               normSeek = 0;
@@ -221,6 +223,11 @@ class Lucene3xNormsProducer extends DocValuesProducer {
   }
 
   @Override
+  public SortedNumericDocValues getSortedNumeric(FieldInfo field) throws IOException {
+    throw new AssertionError();
+  }
+
+  @Override
   public Bits getDocsWithField(FieldInfo field) throws IOException {
     throw new AssertionError();
   }
@@ -229,4 +236,7 @@ class Lucene3xNormsProducer extends DocValuesProducer {
   public long ramBytesUsed() {
     return ramBytesUsed.get();
   }
+  
+  @Override
+  public void checkIntegrity() throws IOException {}
 }

@@ -82,9 +82,19 @@ public final class MultiTerms extends Terms {
     hasPayloads = hasPositions && _hasPayloads; // if all subs have pos, and at least one has payloads.
   }
 
+  /** Expert: returns the Terms being merged. */
+  public Terms[] getSubTerms() {
+    return subs;
+  }
+
+  /** Expert: returns  pointers to the sub-readers corresponding to the Terms being merged. */
+  public ReaderSlice[] getSubSlices() {
+    return subSlices;
+  }
+
   @Override
   public TermsEnum intersect(CompiledAutomaton compiled, BytesRef startTerm) throws IOException {
-    final List<MultiTermsEnum.TermsEnumIndex> termsEnums = new ArrayList<MultiTermsEnum.TermsEnumIndex>();
+    final List<MultiTermsEnum.TermsEnumIndex> termsEnums = new ArrayList<>();
     for(int i=0;i<subs.length;i++) {
       final TermsEnum termsEnum = subs[i].intersect(compiled, startTerm);
       if (termsEnum != null) {
@@ -98,11 +108,37 @@ public final class MultiTerms extends Terms {
       return TermsEnum.EMPTY;
     }
   }
+  
+  @Override
+  public BytesRef getMin() throws IOException {
+    BytesRef minTerm = null;
+    for(Terms terms : subs) {
+      BytesRef term = terms.getMin();
+      if (minTerm == null || term.compareTo(minTerm) < 0) {
+        minTerm = term;
+      }
+    }
+
+    return minTerm;
+  }
+
+  @Override
+  public BytesRef getMax() throws IOException {
+    BytesRef maxTerm = null;
+    for(Terms terms : subs) {
+      BytesRef term = terms.getMax();
+      if (maxTerm == null || term.compareTo(maxTerm) > 0) {
+        maxTerm = term;
+      }
+    }
+
+    return maxTerm;
+  }
 
   @Override
   public TermsEnum iterator(TermsEnum reuse) throws IOException {
 
-    final List<MultiTermsEnum.TermsEnumIndex> termsEnums = new ArrayList<MultiTermsEnum.TermsEnumIndex>();
+    final List<MultiTermsEnum.TermsEnumIndex> termsEnums = new ArrayList<>();
     for(int i=0;i<subs.length;i++) {
       final TermsEnum termsEnum = subs[i].iterator(null);
       if (termsEnum != null) {

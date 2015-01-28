@@ -89,8 +89,8 @@ public abstract class PerFieldPostingsFormat extends PostingsFormat {
     
   private class FieldsWriter extends FieldsConsumer {
 
-    private final Map<PostingsFormat,FieldsConsumerAndSuffix> formats = new HashMap<PostingsFormat,FieldsConsumerAndSuffix>();
-    private final Map<String,Integer> suffixes = new HashMap<String,Integer>();
+    private final Map<PostingsFormat,FieldsConsumerAndSuffix> formats = new HashMap<>();
+    private final Map<String,Integer> suffixes = new HashMap<>();
     
     private final SegmentWriteState segmentWriteState;
 
@@ -170,10 +170,12 @@ public abstract class PerFieldPostingsFormat extends PostingsFormat {
     }
   }
 
-  private class FieldsReader extends FieldsProducer {
+  private static class FieldsReader extends FieldsProducer {
 
-    private final Map<String,FieldsProducer> fields = new TreeMap<String,FieldsProducer>();
-    private final Map<String,FieldsProducer> formats = new HashMap<String,FieldsProducer>();
+    private static final long BASE_RAM_BYTES_USED = RamUsageEstimator.shallowSizeOfInstance(FieldsReader.class);
+
+    private final Map<String,FieldsProducer> fields = new TreeMap<>();
+    private final Map<String,FieldsProducer> formats = new HashMap<>();
 
     public FieldsReader(final SegmentReadState readState) throws IOException {
 
@@ -229,12 +231,20 @@ public abstract class PerFieldPostingsFormat extends PostingsFormat {
 
     @Override
     public long ramBytesUsed() {
-      long sizeInBytes = 0;
+      long ramBytesUsed = BASE_RAM_BYTES_USED;
+      ramBytesUsed += fields.size() * 2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF;
+      ramBytesUsed += formats.size() * 2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF;
       for(Map.Entry<String,FieldsProducer> entry: formats.entrySet()) {
-        sizeInBytes += entry.getKey().length() * RamUsageEstimator.NUM_BYTES_CHAR;
-        sizeInBytes += entry.getValue().ramBytesUsed();
+        ramBytesUsed += entry.getValue().ramBytesUsed();
       }
-      return sizeInBytes;
+      return ramBytesUsed;
+    }
+
+    @Override
+    public void checkIntegrity() throws IOException {
+      for (FieldsProducer producer : formats.values()) {
+        producer.checkIntegrity();
+      }
     }
   }
 

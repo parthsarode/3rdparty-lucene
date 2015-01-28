@@ -172,6 +172,23 @@ public final class IndexFileNames {
     }
     return filename;
   }
+
+  /** Returns the generation from this file name, or 0 if there is no
+   *  generation. */
+  public static long parseGeneration(String filename) {
+    assert filename.startsWith("_");
+    String parts[] = stripExtension(filename).substring(1).split("_");
+    // 4 cases: 
+    // segment.ext
+    // segment_gen.ext
+    // segment_codec_suffix.ext
+    // segment_gen_codec_suffix.ext
+    if (parts.length == 2 || parts.length == 4) {
+      return Long.parseLong(parts[1], Character.MAX_RADIX);
+    } else {
+      return 0;
+    }
+  }
   
   /**
    * Parses the segment name out of the given file name.
@@ -198,6 +215,19 @@ public final class IndexFileNames {
     }
     return filename;
   }  
+
+  /**
+   * Return the extension (anything after the first '.'),
+   * or null if there is no '.' in the file name.
+   */
+  public static String getExtension(String filename) {
+    final int idx = filename.indexOf('.');
+    if (idx == -1) {
+      return null;
+    } else {
+      return filename.substring(idx + 1, filename.length());
+    }
+  }
 
   /**
    * All files created by codecs much match this pattern (checked in

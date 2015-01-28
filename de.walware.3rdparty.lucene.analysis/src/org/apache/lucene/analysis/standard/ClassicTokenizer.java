@@ -25,6 +25,7 @@ import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
 import org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.analysis.tokenattributes.TypeAttribute;
+import org.apache.lucene.util.AttributeFactory;
 import org.apache.lucene.util.Version;
 
 /** A grammar-based tokenizer constructed with JFlex
@@ -83,6 +84,9 @@ public final class ClassicTokenizer extends Tokenizer {
   /** Set the max allowed token length.  Any token longer
    *  than this is skipped. */
   public void setMaxTokenLength(int length) {
+    if (length < 1) {
+      throw new IllegalArgumentException("maxTokenLength must be greater than zero");
+    }
     this.maxTokenLength = length;
   }
 
@@ -99,20 +103,38 @@ public final class ClassicTokenizer extends Tokenizer {
    *
    * See http://issues.apache.org/jira/browse/LUCENE-1068
    */
-  public ClassicTokenizer(Version matchVersion, Reader input) {
+  public ClassicTokenizer(Reader input) {
     super(input);
-    init(matchVersion);
+    init();
   }
 
   /**
-   * Creates a new ClassicTokenizer with a given {@link org.apache.lucene.util.AttributeSource.AttributeFactory} 
+   * @deprecated Use {@link #ClassicTokenizer(AttributeFactory, Reader)}
    */
-  public ClassicTokenizer(Version matchVersion, AttributeFactory factory, Reader input) {
-    super(factory, input);
-    init(matchVersion);
+  @Deprecated
+  public ClassicTokenizer(Version matchVersion, Reader input) {
+    super(input);
+    init();
   }
 
-  private void init(Version matchVersion) {
+  /**
+   * Creates a new ClassicTokenizer with a given {@link org.apache.lucene.util.AttributeFactory} 
+   */
+  public ClassicTokenizer(AttributeFactory factory, Reader input) {
+    super(factory, input);
+    init();
+  }
+
+  /**
+   * @deprecated Use {@link #ClassicTokenizer(AttributeFactory, Reader)}
+   */
+  @Deprecated
+  public ClassicTokenizer(Version matchVersion, AttributeFactory factory, Reader input) {
+    super(factory, input);
+    init();
+  }
+
+  private void init() {
     this.scanner = new ClassicTokenizerImpl(input);
   }
 

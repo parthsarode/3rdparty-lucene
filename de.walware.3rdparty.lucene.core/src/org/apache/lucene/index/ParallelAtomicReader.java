@@ -56,8 +56,8 @@ public class ParallelAtomicReader extends AtomicReader {
   private final boolean closeSubReaders;
   private final int maxDoc, numDocs;
   private final boolean hasDeletions;
-  private final SortedMap<String,AtomicReader> fieldToReader = new TreeMap<String,AtomicReader>();
-  private final SortedMap<String,AtomicReader> tvFieldToReader = new TreeMap<String,AtomicReader>();
+  private final SortedMap<String,AtomicReader> fieldToReader = new TreeMap<>();
+  private final SortedMap<String,AtomicReader> tvFieldToReader = new TreeMap<>();
   
   /** Create a ParallelAtomicReader based on the provided
    *  readers; auto-closes the given readers on {@link #close()}. */
@@ -148,10 +148,20 @@ public class ParallelAtomicReader extends AtomicReader {
     }
     return buffer.append(')').toString();
   }
-  
+
+  @Override
+  public void addCoreClosedListener(CoreClosedListener listener) {
+    addCoreClosedListenerAsReaderClosedListener(this, listener);
+  }
+
+  @Override
+  public void removeCoreClosedListener(CoreClosedListener listener) {
+    removeCoreClosedListenerAsReaderClosedListener(this, listener);
+  }
+
   // Single instance of this, per ParallelReader instance
   private final class ParallelFields extends Fields {
-    final Map<String,Terms> fields = new TreeMap<String,Terms>();
+    final Map<String,Terms> fields = new TreeMap<>();
     
     ParallelFields() {
     }
@@ -277,6 +287,13 @@ public class ParallelAtomicReader extends AtomicReader {
     AtomicReader reader = fieldToReader.get(field);
     return reader == null ? null : reader.getSortedDocValues(field);
   }
+  
+  @Override
+  public SortedNumericDocValues getSortedNumericDocValues(String field) throws IOException {
+    ensureOpen();
+    AtomicReader reader = fieldToReader.get(field);
+    return reader == null ? null : reader.getSortedNumericDocValues(field);
+  }
 
   @Override
   public SortedSetDocValues getSortedSetDocValues(String field) throws IOException {
@@ -298,5 +315,13 @@ public class ParallelAtomicReader extends AtomicReader {
     AtomicReader reader = fieldToReader.get(field);
     NumericDocValues values = reader == null ? null : reader.getNormValues(field);
     return values;
+  }
+
+  @Override
+  public void checkIntegrity() throws IOException {
+    ensureOpen();
+    for (AtomicReader reader : completeReaderSet) {
+      reader.checkIntegrity();
+    }
   }
 }

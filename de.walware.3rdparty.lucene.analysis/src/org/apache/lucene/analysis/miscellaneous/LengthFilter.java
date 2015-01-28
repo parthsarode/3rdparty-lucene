@@ -32,13 +32,19 @@ public final class LengthFilter extends FilteringTokenFilter {
 
   private final int min;
   private final int max;
-  
+
   private final CharTermAttribute termAtt = addAttribute(CharTermAttribute.class);
 
   /** @deprecated enablePositionIncrements=false is not supported anymore as of Lucene 4.4. */
   @Deprecated
   public LengthFilter(Version version, boolean enablePositionIncrements, TokenStream in, int min, int max) {
     super(version, enablePositionIncrements, in);
+    if (min < 0) {
+      throw new IllegalArgumentException("minimum length must be greater than or equal to zero");
+    }
+    if (min > max) {
+      throw new IllegalArgumentException("maximum length must not be greater than minimum length");
+    }
     this.min = min;
     this.max = max;
   }
@@ -47,13 +53,26 @@ public final class LengthFilter extends FilteringTokenFilter {
    * Create a new {@link LengthFilter}. This will filter out tokens whose
    * {@link CharTermAttribute} is either too short ({@link CharTermAttribute#length()}
    * &lt; min) or too long ({@link CharTermAttribute#length()} &gt; max).
-   * @param version the Lucene match version
    * @param in      the {@link TokenStream} to consume
    * @param min     the minimum length
    * @param max     the maximum length
    */
+  public LengthFilter(TokenStream in, int min, int max) {
+    this(Version.LATEST, in, min, max);
+  }
+
+  /**
+   * @deprecated Use {@link #LengthFilter(TokenStream, int, int)}
+   */
+  @Deprecated
   public LengthFilter(Version version, TokenStream in, int min, int max) {
     super(version, in);
+    if (min < 0) {
+      throw new IllegalArgumentException("minimum length must be greater than or equal to zero");
+    }
+    if (min > max) {
+      throw new IllegalArgumentException("maximum length must not be greater than minimum length");
+    }
     this.min = min;
     this.max = max;
   }

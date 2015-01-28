@@ -47,6 +47,15 @@ import org.apache.lucene.util.BytesRef;
  */
 public class FilterAtomicReader extends AtomicReader {
 
+  /** Get the wrapped instance by <code>reader</code> as long as this reader is
+   *  an intance of {@link FilterAtomicReader}.  */
+  public static AtomicReader unwrap(AtomicReader reader) {
+    while (reader instanceof FilterAtomicReader) {
+      reader = ((FilterAtomicReader) reader).in;
+    }
+    return reader;
+  }
+
   /** Base class for filtering {@link Fields}
    *  implementations. */
   public static class FilterFields extends Fields {
@@ -335,6 +344,16 @@ public class FilterAtomicReader extends AtomicReader {
   }
 
   @Override
+  public void addCoreClosedListener(CoreClosedListener listener) {
+    in.addCoreClosedListener(listener);
+  }
+
+  @Override
+  public void removeCoreClosedListener(CoreClosedListener listener) {
+    in.removeCoreClosedListener(listener);
+  }
+
+  @Override
   public Bits getLiveDocs() {
     ensureOpen();
     return in.getLiveDocs();
@@ -406,6 +425,12 @@ public class FilterAtomicReader extends AtomicReader {
     ensureOpen();
     return in.getSortedDocValues(field);
   }
+  
+  @Override
+  public SortedNumericDocValues getSortedNumericDocValues(String field) throws IOException {
+    ensureOpen();
+    return in.getSortedNumericDocValues(field);
+  }
 
   @Override
   public SortedSetDocValues getSortedSetDocValues(String field) throws IOException {
@@ -425,4 +450,9 @@ public class FilterAtomicReader extends AtomicReader {
     return in.getDocsWithField(field);
   }
 
+  @Override
+  public void checkIntegrity() throws IOException {
+    ensureOpen();
+    in.checkIntegrity();
+  }
 }

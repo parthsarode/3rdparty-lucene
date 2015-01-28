@@ -1,17 +1,5 @@
 package org.apache.lucene.index;
 
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import org.apache.lucene.codecs.DocValuesFormat;
-import org.apache.lucene.codecs.DocValuesProducer;
-import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.IOContext;
-import org.apache.lucene.util.IOUtils;
-import org.apache.lucene.util.RefCount;
-
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -29,16 +17,28 @@ import org.apache.lucene.util.RefCount;
  * limitations under the License.
  */
 
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.apache.lucene.codecs.DocValuesFormat;
+import org.apache.lucene.codecs.DocValuesProducer;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.IOContext;
+import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.RefCount;
+
 /**
  * Manages the {@link DocValuesProducer} held by {@link SegmentReader} and
  * keeps track of their reference counting.
  */
 final class SegmentDocValues {
 
-  private final Map<Long,RefCount<DocValuesProducer>> genDVProducers = new HashMap<Long,RefCount<DocValuesProducer>>();
+  private final Map<Long,RefCount<DocValuesProducer>> genDVProducers = new HashMap<>();
 
   private RefCount<DocValuesProducer> newDocValuesProducer(SegmentCommitInfo si, IOContext context, Directory dir,
-      DocValuesFormat dvFormat, final Long gen, List<FieldInfo> infos, int termsIndexDivisor) throws IOException {
+      DocValuesFormat dvFormat, final Long gen, FieldInfos infos, int termsIndexDivisor) throws IOException {
     Directory dvDir = dir;
     String segmentSuffix = "";
     if (gen.longValue() != -1) {
@@ -47,7 +47,7 @@ final class SegmentDocValues {
     }
 
     // set SegmentReadState to list only the fields that are relevant to that gen
-    SegmentReadState srs = new SegmentReadState(dvDir, si.info, new FieldInfos(infos.toArray(new FieldInfo[infos.size()])), context, termsIndexDivisor, segmentSuffix);
+    SegmentReadState srs = new SegmentReadState(dvDir, si.info, infos, context, termsIndexDivisor, segmentSuffix);
     return new RefCount<DocValuesProducer>(dvFormat.fieldsProducer(srs)) {
       @SuppressWarnings("synthetic-access")
       @Override
@@ -62,7 +62,7 @@ final class SegmentDocValues {
 
   /** Returns the {@link DocValuesProducer} for the given generation. */
   synchronized DocValuesProducer getDocValuesProducer(long gen, SegmentCommitInfo si, IOContext context, Directory dir, 
-      DocValuesFormat dvFormat, List<FieldInfo> infos, int termsIndexDivisor) throws IOException {
+      DocValuesFormat dvFormat, FieldInfos infos, int termsIndexDivisor) throws IOException {
     RefCount<DocValuesProducer> dvp = genDVProducers.get(gen);
     if (dvp == null) {
       dvp = newDocValuesProducer(si, context, dir, dvFormat, gen, infos, termsIndexDivisor);
@@ -95,14 +95,4 @@ final class SegmentDocValues {
       IOUtils.reThrow(t);
     }
   }
-
-  /** Returns approximate RAM bytes used. */
-  synchronized long ramBytesUsed() {
-    long ramBytesUsed = 0;
-    for (RefCount<DocValuesProducer> dvp : genDVProducers.values()) {
-      ramBytesUsed += dvp.get().ramBytesUsed();
-    }
-    return ramBytesUsed;
-  }
-
 }

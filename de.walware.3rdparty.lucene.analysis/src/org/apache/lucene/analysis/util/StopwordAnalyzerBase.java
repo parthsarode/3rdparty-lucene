@@ -20,6 +20,7 @@ package org.apache.lucene.analysis.util;
 import java.io.File;
 import java.io.IOException;
 import java.io.Reader;
+import java.nio.charset.StandardCharsets;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.util.IOUtils;
@@ -36,8 +37,6 @@ public abstract class StopwordAnalyzerBase extends Analyzer {
    */
   protected final CharArraySet stopwords;
 
-  protected final Version matchVersion;
-
   /**
    * Returns the analyzer's stopword set or an empty set if the analyzer has no
    * stopwords
@@ -52,24 +51,37 @@ public abstract class StopwordAnalyzerBase extends Analyzer {
   /**
    * Creates a new instance initialized with the given stopword set
    * 
-   * @param version
-   *          the Lucene version for cross version compatibility
    * @param stopwords
    *          the analyzer's stopword set
    */
+  protected StopwordAnalyzerBase(final CharArraySet stopwords) {
+    // analyzers should use char array set for stopwords!
+    this.stopwords = stopwords == null ? CharArraySet.EMPTY_SET : CharArraySet
+        .unmodifiableSet(CharArraySet.copy(stopwords));
+  }
+
+  /**
+   * @deprecated Use {@link #StopwordAnalyzerBase(CharArraySet)}
+   */
+  @Deprecated
   protected StopwordAnalyzerBase(final Version version, final CharArraySet stopwords) {
-    matchVersion = version;
     // analyzers should use char array set for stopwords!
     this.stopwords = stopwords == null ? CharArraySet.EMPTY_SET : CharArraySet
         .unmodifiableSet(CharArraySet.copy(version, stopwords));
+    setVersion(version);
   }
 
   /**
    * Creates a new Analyzer with an empty stopword set
-   * 
-   * @param version
-   *          the Lucene version for cross version compatibility
    */
+  protected StopwordAnalyzerBase() {
+    this((CharArraySet)null);
+  }
+
+  /**
+   * @deprecated Use {@link #StopwordAnalyzerBase()}
+   */
+  @Deprecated
   protected StopwordAnalyzerBase(final Version version) {
     this(version, null);
   }
@@ -97,8 +109,8 @@ public abstract class StopwordAnalyzerBase extends Analyzer {
       final String comment) throws IOException {
     Reader reader = null;
     try {
-      reader = IOUtils.getDecodingReader(aClass.getResourceAsStream(resource), IOUtils.CHARSET_UTF_8);
-      return WordlistLoader.getWordSet(reader, comment, new CharArraySet(Version.LUCENE_CURRENT, 16, ignoreCase));
+      reader = IOUtils.getDecodingReader(aClass.getResourceAsStream(resource), StandardCharsets.UTF_8);
+      return WordlistLoader.getWordSet(reader, comment, new CharArraySet(16, ignoreCase));
     } finally {
       IOUtils.close(reader);
     }
@@ -110,19 +122,24 @@ public abstract class StopwordAnalyzerBase extends Analyzer {
    * 
    * @param stopwords
    *          the stopwords file to load
-   * 
-   * @param matchVersion
-   *          the Lucene version for cross version compatibility
    * @return a CharArraySet containing the distinct stopwords from the given
    *         file
    * @throws IOException
    *           if loading the stopwords throws an {@link IOException}
    */
+  protected static CharArraySet loadStopwordSet(File stopwords) throws IOException {
+    return loadStopwordSet(stopwords, Version.LATEST);
+  }
+
+  /**
+   * @deprecated Use {@link #loadStopwordSet(File)}
+   */
+  @Deprecated
   protected static CharArraySet loadStopwordSet(File stopwords,
       Version matchVersion) throws IOException {
     Reader reader = null;
     try {
-      reader = IOUtils.getDecodingReader(stopwords, IOUtils.CHARSET_UTF_8);
+      reader = IOUtils.getDecodingReader(stopwords, StandardCharsets.UTF_8);
       return WordlistLoader.getWordSet(reader, matchVersion);
     } finally {
       IOUtils.close(reader);
@@ -135,13 +152,19 @@ public abstract class StopwordAnalyzerBase extends Analyzer {
    * @param stopwords
    *          the stopwords reader to load
    * 
-   * @param matchVersion
-   *          the Lucene version for cross version compatibility
    * @return a CharArraySet containing the distinct stopwords from the given
    *         reader
    * @throws IOException
    *           if loading the stopwords throws an {@link IOException}
    */
+  protected static CharArraySet loadStopwordSet(Reader stopwords) throws IOException {
+    return loadStopwordSet(stopwords, Version.LATEST);
+  }
+
+  /**
+   * @deprecated Use {@link #loadStopwordSet(Reader)}
+   */
+  @Deprecated
   protected static CharArraySet loadStopwordSet(Reader stopwords,
       Version matchVersion) throws IOException {
     try {

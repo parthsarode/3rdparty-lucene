@@ -28,13 +28,8 @@ import java.util.Comparator;
 
 public final class ArrayUtil {
 
-  /** Maximum length for an array; we set this to "a
-   *  bit" below Integer.MAX_VALUE because the exact max
-   *  allowed byte[] is JVM dependent, so we want to avoid
-   *  a case where a large value worked during indexing on
-   *  one JVM but failed later at search time with a
-   *  different JVM. */
-  public static final int MAX_ARRAY_LENGTH = Integer.MAX_VALUE - 256;
+  /** Maximum length for an array (Integer.MAX_VALUE - RamUsageEstimator.NUM_BYTES_ARRAY_HEADER). */
+  public static final int MAX_ARRAY_LENGTH = Integer.MAX_VALUE - RamUsageEstimator.NUM_BYTES_ARRAY_HEADER;
 
   private ArrayUtil() {} // no instance
 
@@ -169,6 +164,10 @@ public final class ArrayUtil {
       return 0;
     }
 
+    if (minTargetSize > MAX_ARRAY_LENGTH) {
+      throw new IllegalArgumentException("requested array size " + minTargetSize + " exceeds maximum array in java (" + MAX_ARRAY_LENGTH + ")");
+    }
+
     // asymptotic exponential growth by 1/8th, favors
     // spending a bit more CPU to not tie up too much wasted
     // RAM:
@@ -184,9 +183,9 @@ public final class ArrayUtil {
     int newSize = minTargetSize + extra;
 
     // add 7 to allow for worst case byte alignment addition below:
-    if (newSize+7 < 0) {
-      // int overflowed -- return max allowed array size
-      return Integer.MAX_VALUE;
+    if (newSize+7 < 0 || newSize+7 > MAX_ARRAY_LENGTH) {
+      // int overflowed, or we exceeded the maximum array length
+      return MAX_ARRAY_LENGTH;
     }
 
     if (Constants.JRE_IS_64BIT) {
@@ -647,7 +646,7 @@ public final class ArrayUtil {
    */
   public static <T> void introSort(T[] a, int fromIndex, int toIndex, Comparator<? super T> comp) {
     if (toIndex-fromIndex <= 1) return;
-    new ArrayIntroSorter<T>(a, comp).sort(fromIndex, toIndex);
+    new ArrayIntroSorter<>(a, comp).sort(fromIndex, toIndex);
   }
   
   /**
@@ -687,7 +686,7 @@ public final class ArrayUtil {
    */
   public static <T> void timSort(T[] a, int fromIndex, int toIndex, Comparator<? super T> comp) {
     if (toIndex-fromIndex <= 1) return;
-    new ArrayTimSorter<T>(a, comp, a.length / 64).sort(fromIndex, toIndex);
+    new ArrayTimSorter<>(a, comp, a.length / 64).sort(fromIndex, toIndex);
   }
   
   /**

@@ -21,7 +21,11 @@ import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.concurrent.locks.ReentrantLock;
 
+import org.apache.lucene.index.DocValuesUpdate.BinaryDocValuesUpdate;
+import org.apache.lucene.index.DocValuesUpdate.NumericDocValuesUpdate;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.util.Accountable;
+import org.apache.lucene.util.BytesRef;
 
 /**
  * {@link DocumentsWriterDeleteQueue} is a non-blocking linked pending deletes
@@ -63,7 +67,7 @@ import org.apache.lucene.search.Query;
  * will also not be added to its private deletes neither to the global deletes.
  * 
  */
-final class DocumentsWriterDeleteQueue {
+final class DocumentsWriterDeleteQueue implements Accountable {
 
   private volatile Node<?> tail;
   
@@ -93,7 +97,7 @@ final class DocumentsWriterDeleteQueue {
      * we use a sentinel instance as our initial tail. No slice will ever try to
      * apply this tail since the head is always omitted.
      */
-    tail = new Node<Object>(null); // sentinel
+    tail = new Node<>(null); // sentinel
     globalSlice = new DeleteSlice(tail);
   }
 
@@ -107,11 +111,11 @@ final class DocumentsWriterDeleteQueue {
     tryApplyGlobalSlice();
   }
 
-  void addNumericUpdate(NumericUpdate update) {
-    add(new NumericUpdateNode(update));
+  void addDocValuesUpdates(DocValuesUpdate... updates) {
+    add(new DocValuesUpdatesNode(updates));
     tryApplyGlobalSlice();
   }
-
+  
   /**
    * invariant for document update
    */
@@ -385,23 +389,43 @@ final class DocumentsWriterDeleteQueue {
     }
   }
 
-  private static final class NumericUpdateNode extends Node<NumericUpdate> {
+  private static final class DocValuesUpdatesNode extends Node<DocValuesUpdate[]> {
 
-    NumericUpdateNode(NumericUpdate update) {
-      super(update);
+    DocValuesUpdatesNode(DocValuesUpdate... updates) {
+      super(updates);
     }
 
     @Override
     void apply(BufferedUpdates bufferedUpdates, int docIDUpto) {
-      bufferedUpdates.addNumericUpdate(item, docIDUpto);
+      for (DocValuesUpdate update : item) {
+        switch (update.type) {
+          case NUMERIC:
+            bufferedUpdates.addNumericUpdate(new NumericDocValuesUpdate(update.term, update.field, (Long) update.value), docIDUpto);
+            break;
+          case BINARY:
+            bufferedUpdates.addBinaryUpdate(new BinaryDocValuesUpdate(update.term, update.field, (BytesRef) update.value), docIDUpto);
+            break;
+          default:
+            throw new IllegalArgumentException(update.type + " DocValues updates not supported yet!");
+        }
+      }
     }
 
     @Override
     public String toString() {
-      return "update=" + item;
+      StringBuilder sb = new StringBuilder();
+      sb.append("docValuesUpdates: ");
+      if (item.length > 0) {
+        sb.append("term=").append(item[0].term).append("; updates: [");
+        for (DocValuesUpdate update : item) {
+          sb.append(update.field).append(':').append(update.value).append(',');
+        }
+        sb.setCharAt(sb.length()-1, ']');
+      }
+      return sb.toString();
     }
   }
-
+  
   private boolean forceApplyGlobalSlice() {
     globalBufferLock.lock();
     final Node<?> currentTail = tail;
@@ -425,8 +449,9 @@ final class DocumentsWriterDeleteQueue {
       globalBufferLock.unlock();
     }
   }
-  
-  public long bytesUsed() {
+
+  @Override
+  public long ramBytesUsed() {
     return globalBufferedUpdates.bytesUsed.get();
   }
 

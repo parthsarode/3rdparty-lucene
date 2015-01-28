@@ -103,7 +103,7 @@ public class NearSpansOrdered extends Spans {
     allowedSlop = spanNearQuery.getSlop();
     SpanQuery[] clauses = spanNearQuery.getClauses();
     subSpans = new Spans[clauses.length];
-    matchPayload = new LinkedList<byte[]>();
+    matchPayload = new LinkedList<>();
     subSpansByDoc = new Spans[clauses.length];
     for (int i = 0; i < clauses.length; i++) {
       subSpans[i] = clauses[i].getSpans(context, acceptDocs, termContexts);
@@ -235,24 +235,23 @@ public class NearSpansOrdered extends Spans {
     return true;
   }
   
-  /** Check whether two Spans in the same document are ordered.
-   * @return true iff spans1 starts before spans2
-   *              or the spans start at the same position,
-   *              and spans1 ends before spans2.
+  /** Check whether two Spans in the same document are ordered and not overlapping.
+   * @return false iff spans2's start position is smaller than spans1's end position
    */
-  static final boolean docSpansOrdered(Spans spans1, Spans spans2) {
+  static final boolean docSpansOrderedNonOverlap(Spans spans1, Spans spans2) {
     assert spans1.doc() == spans2.doc() : "doc1 " + spans1.doc() + " != doc2 " + spans2.doc();
-    int start1 = spans1.start();
-    int start2 = spans2.start();
-    /* Do not call docSpansOrdered(int,int,int,int) to avoid invoking .end() : */
-    return (start1 == start2) ? (spans1.end() < spans2.end()) : (start1 < start2);
+    assert spans1.start() < spans1.end();
+    assert spans2.start() < spans2.end();
+    return spans1.end() <= spans2.start();
   }
 
-  /** Like {@link #docSpansOrdered(Spans,Spans)}, but use the spans
+  /** Like {@link #docSpansOrderedNonOverlap(Spans,Spans)}, but use the spans
    * starts and ends as parameters.
    */
-  private static final boolean docSpansOrdered(int start1, int end1, int start2, int end2) {
-    return (start1 == start2) ? (end1 < end2) : (start1 < start2);
+  private static final boolean docSpansOrderedNonOverlap(int start1, int end1, int start2, int end2) {
+    assert start1 < end1;
+    assert start2 < end2;
+    return end1 <= start2;
   }
 
   /** Order the subSpans within the same document by advancing all later spans
@@ -261,7 +260,7 @@ public class NearSpansOrdered extends Spans {
   private boolean stretchToOrder() throws IOException {
     matchDoc = subSpans[0].doc();
     for (int i = 1; inSameDoc && (i < subSpans.length); i++) {
-      while (! docSpansOrdered(subSpans[i-1], subSpans[i])) {
+      while (! docSpansOrderedNonOverlap(subSpans[i-1], subSpans[i])) {
         if (! subSpans[i].next()) {
           inSameDoc = false;
           more = false;
@@ -282,7 +281,7 @@ public class NearSpansOrdered extends Spans {
   private boolean shrinkToAfterShortestMatch() throws IOException {
     matchStart = subSpans[subSpans.length - 1].start();
     matchEnd = subSpans[subSpans.length - 1].end();
-    Set<byte[]> possibleMatchPayloads = new HashSet<byte[]>();
+    Set<byte[]> possibleMatchPayloads = new HashSet<>();
     if (subSpans[subSpans.length - 1].isPayloadAvailable()) {
       possibleMatchPayloads.addAll(subSpans[subSpans.length - 1].getPayload());
     }
@@ -296,7 +295,7 @@ public class NearSpansOrdered extends Spans {
       Spans prevSpans = subSpans[i];
       if (collectPayloads && prevSpans.isPayloadAvailable()) {
         Collection<byte[]> payload = prevSpans.getPayload();
-        possiblePayload = new ArrayList<byte[]>(payload.size());
+        possiblePayload = new ArrayList<>(payload.size());
         possiblePayload.addAll(payload);
       }
       
@@ -313,14 +312,14 @@ public class NearSpansOrdered extends Spans {
         } else {
           int ppStart = prevSpans.start();
           int ppEnd = prevSpans.end(); // Cannot avoid invoking .end()
-          if (! docSpansOrdered(ppStart, ppEnd, lastStart, lastEnd)) {
+          if (! docSpansOrderedNonOverlap(ppStart, ppEnd, lastStart, lastEnd)) {
             break; // Check remaining subSpans.
           } else { // prevSpans still before (lastStart, lastEnd)
             prevStart = ppStart;
             prevEnd = ppEnd;
             if (collectPayloads && prevSpans.isPayloadAvailable()) {
               Collection<byte[]> payload = prevSpans.getPayload();
-              possiblePayload = new ArrayList<byte[]>(payload.size());
+              possiblePayload = new ArrayList<>(payload.size());
               possiblePayload.addAll(payload);
             }
           }

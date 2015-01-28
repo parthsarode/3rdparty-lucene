@@ -31,16 +31,15 @@ import org.apache.lucene.analysis.standard.StandardTokenizer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;  // for javadoc
 import org.apache.lucene.analysis.util.CharArrayMap;
 import org.apache.lucene.analysis.util.CharArraySet;
-import org.apache.lucene.analysis.util.CharacterUtils;
 import org.apache.lucene.analysis.util.WordlistLoader;
-import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.CharsRef;
+import org.apache.lucene.util.CharsRefBuilder;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.Version;
-import org.apache.lucene.util.fst.FST;
 
 import java.io.IOException;
 import java.io.Reader;
+import java.nio.charset.StandardCharsets;
 
 /**
  * {@link Analyzer} for Dutch language. 
@@ -54,7 +53,7 @@ import java.io.Reader;
  * </p>
  *
  * <a name="version"/>
- * <p>You must specify the required {@link Version}
+ * <p>You may specify the {@link Version}
  * compatibility when creating DutchAnalyzer:
  * <ul>
  *   <li> As of 3.6, {@link #DutchAnalyzer(Version, CharArraySet)} and
@@ -63,13 +62,12 @@ import java.io.Reader;
  *   <li> As of 3.1, Snowball stemming is done with SnowballFilter, 
  *        LowerCaseFilter is used prior to StopFilter, and Snowball 
  *        stopwords are used by default.
- *   <li> As of 2.9, StopFilter preserves position
- *        increments
  * </ul>
  * 
  * <p><b>NOTE</b>: This class uses the same {@link Version}
  * dependent settings as {@link StandardAnalyzer}.</p>
  */
+// TODO: extend StopwordAnalyzerBase
 public final class DutchAnalyzer extends Analyzer {
   
   /** File containing default Dutch stopwords. */
@@ -89,14 +87,14 @@ public final class DutchAnalyzer extends Analyzer {
     static {
       try {
         DEFAULT_STOP_SET = WordlistLoader.getSnowballWordSet(IOUtils.getDecodingReader(SnowballFilter.class, 
-            DEFAULT_STOPWORD_FILE, IOUtils.CHARSET_UTF_8), Version.LUCENE_CURRENT);
+            DEFAULT_STOPWORD_FILE, StandardCharsets.UTF_8));
       } catch (IOException ex) {
         // default set should always be present as it is part of the
         // distribution (JAR)
         throw new RuntimeException("Unable to load default stopword set");
       }
       
-      DEFAULT_STEM_DICT = new CharArrayMap<String>(Version.LUCENE_CURRENT, 4, false);
+      DEFAULT_STEM_DICT = new CharArrayMap<>(4, false);
       DEFAULT_STEM_DICT.put("fiets", "fiets"); //otherwise fiet
       DEFAULT_STEM_DICT.put("bromfiets", "bromfiets"); //otherwise bromfiet
       DEFAULT_STEM_DICT.put("ei", "eier");
@@ -119,41 +117,72 @@ public final class DutchAnalyzer extends Analyzer {
 
   // null if on 3.1 or later - only for bw compat
   private final CharArrayMap<String> origStemdict;
-  private final Version matchVersion;
 
   /**
    * Builds an analyzer with the default stop words ({@link #getDefaultStopSet()}) 
    * and a few default entries for the stem exclusion table.
    * 
    */
+  public DutchAnalyzer() {
+    this(Version.LATEST);
+  }
+
+  /**
+   * @deprecated Use {@link #DutchAnalyzer()}
+   */
+  @Deprecated
   public DutchAnalyzer(Version matchVersion) {
     // historically, only this ctor populated the stem dict!!!!!
     this(matchVersion, DefaultSetHolder.DEFAULT_STOP_SET, CharArraySet.EMPTY_SET, DefaultSetHolder.DEFAULT_STEM_DICT);
   }
-  
+
+  public DutchAnalyzer(CharArraySet stopwords){
+    this(Version.LATEST, stopwords);
+  }
+
+  /**
+   * @deprecated Use {@link #DutchAnalyzer(CharArraySet)}
+   */
+  @Deprecated
   public DutchAnalyzer(Version matchVersion, CharArraySet stopwords){
     // historically, this ctor never the stem dict!!!!!
     // so we populate it only for >= 3.6
     this(matchVersion, stopwords, CharArraySet.EMPTY_SET, 
-        matchVersion.onOrAfter(Version.LUCENE_36) 
+        matchVersion.onOrAfter(Version.LUCENE_3_6) 
         ? DefaultSetHolder.DEFAULT_STEM_DICT 
         : CharArrayMap.<String>emptyMap());
   }
-  
+
+  public DutchAnalyzer(CharArraySet stopwords, CharArraySet stemExclusionTable){
+    this(Version.LATEST, stopwords, stemExclusionTable);
+  }
+
+  /**
+   * @deprecated Use {@link #DutchAnalyzer(CharArraySet,CharArraySet)}
+   */
+  @Deprecated
   public DutchAnalyzer(Version matchVersion, CharArraySet stopwords, CharArraySet stemExclusionTable){
     // historically, this ctor never the stem dict!!!!!
     // so we populate it only for >= 3.6
     this(matchVersion, stopwords, stemExclusionTable,
-        matchVersion.onOrAfter(Version.LUCENE_36)
+        matchVersion.onOrAfter(Version.LUCENE_3_6)
         ? DefaultSetHolder.DEFAULT_STEM_DICT
         : CharArrayMap.<String>emptyMap());
   }
-  
+
+  public DutchAnalyzer(CharArraySet stopwords, CharArraySet stemExclusionTable, CharArrayMap<String> stemOverrideDict) {
+    this(Version.LATEST, stopwords, stemExclusionTable, stemOverrideDict);
+  }
+
+  /**
+   * @deprecated Use {@link #DutchAnalyzer(CharArraySet,CharArraySet,CharArrayMap)}
+   */
+  @Deprecated
   public DutchAnalyzer(Version matchVersion, CharArraySet stopwords, CharArraySet stemExclusionTable, CharArrayMap<String> stemOverrideDict) {
-    this.matchVersion = matchVersion;
+    setVersion(matchVersion);
     this.stoptable = CharArraySet.unmodifiableSet(CharArraySet.copy(matchVersion, stopwords));
     this.excltable = CharArraySet.unmodifiableSet(CharArraySet.copy(matchVersion, stemExclusionTable));
-    if (stemOverrideDict.isEmpty() || !matchVersion.onOrAfter(Version.LUCENE_31)) {
+    if (stemOverrideDict.isEmpty() || !matchVersion.onOrAfter(Version.LUCENE_3_1)) {
       this.stemdict = null;
       this.origStemdict = CharArrayMap.unmodifiableMap(CharArrayMap.copy(matchVersion, stemOverrideDict));
     } else {
@@ -161,11 +190,11 @@ public final class DutchAnalyzer extends Analyzer {
       // we don't need to ignore case here since we lowercase in this analyzer anyway
       StemmerOverrideFilter.Builder builder = new StemmerOverrideFilter.Builder(false);
       CharArrayMap<String>.EntryIterator iter = stemOverrideDict.entrySet().iterator();
-      CharsRef spare = new CharsRef();
+      CharsRefBuilder spare = new CharsRefBuilder();
       while (iter.hasNext()) {
         char[] nextKey = iter.nextKey();
         spare.copyChars(nextKey, 0, nextKey.length);
-        builder.add(spare, iter.currentValue());
+        builder.add(spare.get(), iter.currentValue());
       }
       try {
         this.stemdict = builder.build();
@@ -187,11 +216,11 @@ public final class DutchAnalyzer extends Analyzer {
   @Override
   protected TokenStreamComponents createComponents(String fieldName,
       Reader aReader) {
-    if (matchVersion.onOrAfter(Version.LUCENE_31)) {
-      final Tokenizer source = new StandardTokenizer(matchVersion, aReader);
-      TokenStream result = new StandardFilter(matchVersion, source);
-      result = new LowerCaseFilter(matchVersion, result);
-      result = new StopFilter(matchVersion, result, stoptable);
+    if (getVersion().onOrAfter(Version.LUCENE_3_1)) {
+      final Tokenizer source = new StandardTokenizer(getVersion(), aReader);
+      TokenStream result = new StandardFilter(getVersion(), source);
+      result = new LowerCaseFilter(getVersion(), result);
+      result = new StopFilter(getVersion(), result, stoptable);
       if (!excltable.isEmpty())
         result = new SetKeywordMarkerFilter(result, excltable);
       if (stemdict != null)
@@ -199,9 +228,9 @@ public final class DutchAnalyzer extends Analyzer {
       result = new SnowballFilter(result, new org.tartarus.snowball.ext.DutchStemmer());
       return new TokenStreamComponents(source, result);
     } else {
-      final Tokenizer source = new StandardTokenizer(matchVersion, aReader);
-      TokenStream result = new StandardFilter(matchVersion, source);
-      result = new StopFilter(matchVersion, result, stoptable);
+      final Tokenizer source = new StandardTokenizer(getVersion(), aReader);
+      TokenStream result = new StandardFilter(getVersion(), source);
+      result = new StopFilter(getVersion(), result, stoptable);
       if (!excltable.isEmpty())
         result = new SetKeywordMarkerFilter(result, excltable);
       result = new DutchStemFilter(result, origStemdict);

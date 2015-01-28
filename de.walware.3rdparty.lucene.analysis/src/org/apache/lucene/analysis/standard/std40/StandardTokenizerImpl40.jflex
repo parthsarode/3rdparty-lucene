@@ -21,11 +21,11 @@ import org.apache.lucene.analysis.standard.StandardTokenizerInterface;
 import org.apache.lucene.analysis.standard.StandardTokenizer;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 
+@Deprecated
 /**
  * This class implements StandardTokenizer using Unicode 6.1.0.
  * @deprecated This class is only for exact backwards compatibility
  */
-@Deprecated
 %%
 
 %unicode 6.1
@@ -103,6 +103,10 @@ HiraganaEx = {Hiragana} ({Format} | {Extend})*
   public final void getText(CharTermAttribute t) {
     t.copyBuffer(zzBuffer, zzStartRead, zzMarkedPos-zzStartRead);
   }
+
+   public final void setBufferSize(int numChars) {
+     throw new UnsupportedOperationException();
+   }
 %}
 
 %%

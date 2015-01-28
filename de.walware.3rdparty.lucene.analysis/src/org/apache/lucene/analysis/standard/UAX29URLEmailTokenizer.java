@@ -29,6 +29,7 @@ import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
 import org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.analysis.tokenattributes.TypeAttribute;
+import org.apache.lucene.util.AttributeFactory;
 import org.apache.lucene.util.Version;
 
 /**
@@ -49,7 +50,7 @@ import org.apache.lucene.util.Version;
  *   <li>&lt;HIRAGANA&gt;: A single hiragana character</li>
  * </ul>
  * <a name="version"/>
- * <p>You must specify the required {@link Version}
+ * <p>You may specify the {@link Version}
  * compatibility when creating UAX29URLEmailTokenizer:
  * <ul>
  *   <li> As of 3.4, Hiragana and Han characters are no longer wrongly split
@@ -92,7 +93,13 @@ public final class UAX29URLEmailTokenizer extends Tokenizer {
   /** Set the max allowed token length.  Any token longer
    *  than this is skipped. */
   public void setMaxTokenLength(int length) {
+    if (length < 1) {
+      throw new IllegalArgumentException("maxTokenLength must be greater than zero");
+    }
     this.maxTokenLength = length;
+    if (scanner instanceof UAX29URLEmailTokenizerImpl) {
+      scanner.setBufferSize(Math.min(length, 1024 * 1024)); // limit buffer size to 1M chars
+    }
   }
 
   /** @see #setMaxTokenLength */
@@ -106,14 +113,32 @@ public final class UAX29URLEmailTokenizer extends Tokenizer {
    *
    * @param input The input reader
    */
+  public UAX29URLEmailTokenizer(Reader input) {
+    super(input);
+    this.scanner = getScannerFor(Version.LATEST);
+  }
+
+  /**
+   * @deprecated Use {@link #UAX29URLEmailTokenizer(Reader)}
+   */
+  @Deprecated
   public UAX29URLEmailTokenizer(Version matchVersion, Reader input) {
     super(input);
     this.scanner = getScannerFor(matchVersion);
   }
 
   /**
-   * Creates a new UAX29URLEmailTokenizer with a given {@link org.apache.lucene.util.AttributeSource.AttributeFactory}
+   * Creates a new UAX29URLEmailTokenizer with a given {@link AttributeFactory}
    */
+  public UAX29URLEmailTokenizer(AttributeFactory factory, Reader input) {
+    super(factory, input);
+    this.scanner = getScannerFor(Version.LATEST);
+  }
+
+  /**
+   * @deprecated Use {@link #UAX29URLEmailTokenizer(Reader)}
+   */
+  @Deprecated
   public UAX29URLEmailTokenizer(Version matchVersion, AttributeFactory factory, Reader input) {
     super(factory, input);
     this.scanner = getScannerFor(matchVersion);
@@ -121,13 +146,13 @@ public final class UAX29URLEmailTokenizer extends Tokenizer {
 
   private StandardTokenizerInterface getScannerFor(Version matchVersion) {
     // best effort NPE if you dont call reset
-    if (matchVersion.onOrAfter(Version.LUCENE_47)) {
+    if (matchVersion.onOrAfter(Version.LUCENE_4_7)) {
       return new UAX29URLEmailTokenizerImpl(input);
-    } else if (matchVersion.onOrAfter(Version.LUCENE_40)) {
+    } else if (matchVersion.onOrAfter(Version.LUCENE_4_0)) {
       return new UAX29URLEmailTokenizerImpl40(input);
-    } else if (matchVersion.onOrAfter(Version.LUCENE_36)) {
+    } else if (matchVersion.onOrAfter(Version.LUCENE_3_6)) {
       return new UAX29URLEmailTokenizerImpl36(input);
-    } else if (matchVersion.onOrAfter(Version.LUCENE_34)) {
+    } else if (matchVersion.onOrAfter(Version.LUCENE_3_4)) {
       return new UAX29URLEmailTokenizerImpl34(input);
     } else {
       return new UAX29URLEmailTokenizerImpl31(input);

@@ -38,30 +38,35 @@ import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.index.BinaryDocValues;
 import org.apache.lucene.index.CorruptIndexException;
+import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.DocsAndPositionsEnum;
 import org.apache.lucene.index.DocsEnum;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.IndexFileNames;
 import org.apache.lucene.index.NumericDocValues;
+import org.apache.lucene.index.RandomAccessOrds;
 import org.apache.lucene.index.SegmentReadState;
-import org.apache.lucene.index.SingletonSortedSetDocValues;
 import org.apache.lucene.index.SortedDocValues;
+import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.index.TermsEnum.SeekStatus;
+import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LongValues;
 import org.apache.lucene.util.RamUsageEstimator;
+import org.apache.lucene.util.StringHelper;
+import org.apache.lucene.util.Version;
 import org.apache.lucene.util.packed.BlockPackedReader;
 import org.apache.lucene.util.packed.MonotonicBlockPackedReader;
 import org.apache.lucene.util.packed.PackedInts;
 
 /** reader for {@link Lucene45DocValuesFormat} */
-public class Lucene45DocValuesProducer extends DocValuesProducer implements Closeable {
+class Lucene45DocValuesProducer extends DocValuesProducer implements Closeable {
   private final Map<Integer,NumericEntry> numerics;
   private final Map<Integer,BinaryEntry> binaries;
   private final Map<Integer,SortedSetEntry> sortedSets;
@@ -71,28 +76,45 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
   private final IndexInput data;
   private final int maxDoc;
   private final int version;
+  
+  // We need this for pre-4.9 indexes which recorded multiple fields' DocValues
+  // updates under the same generation, and therefore the passed FieldInfos may
+  // not include all the fields that are encoded in this generation. In that
+  // case, we are more lenient about the fields we read and the passed-in
+  // FieldInfos.
+  @Deprecated
+  private final boolean lenientFieldInfoCheck;
 
   // memory-resident structures
-  private final Map<Integer,MonotonicBlockPackedReader> addressInstances = new HashMap<Integer,MonotonicBlockPackedReader>();
-  private final Map<Integer,MonotonicBlockPackedReader> ordIndexInstances = new HashMap<Integer,MonotonicBlockPackedReader>();
+  private final Map<Integer,MonotonicBlockPackedReader> addressInstances = new HashMap<>();
+  private final Map<Integer,MonotonicBlockPackedReader> ordIndexInstances = new HashMap<>();
   
   /** expert: instantiates a new reader */
+  @SuppressWarnings("deprecation")
   protected Lucene45DocValuesProducer(SegmentReadState state, String dataCodec, String dataExtension, String metaCodec, String metaExtension) throws IOException {
+    Version ver = state.segmentInfo.getVersion();
+    lenientFieldInfoCheck = Version.LUCENE_4_9_0.onOrAfter(ver);
     String metaName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, metaExtension);
     // read in the entries from the metadata file.
-    IndexInput in = state.directory.openInput(metaName, state.context);
+    ChecksumIndexInput in = state.directory.openChecksumInput(metaName, state.context);
     this.maxDoc = state.segmentInfo.getDocCount();
     boolean success = false;
     try {
       version = CodecUtil.checkHeader(in, metaCodec, 
                                       Lucene45DocValuesFormat.VERSION_START,
                                       Lucene45DocValuesFormat.VERSION_CURRENT);
-      numerics = new HashMap<Integer,NumericEntry>();
-      ords = new HashMap<Integer,NumericEntry>();
-      ordIndexes = new HashMap<Integer,NumericEntry>();
-      binaries = new HashMap<Integer,BinaryEntry>();
-      sortedSets = new HashMap<Integer,SortedSetEntry>();
+      numerics = new HashMap<>();
+      ords = new HashMap<>();
+      ordIndexes = new HashMap<>();
+      binaries = new HashMap<>();
+      sortedSets = new HashMap<>();
       readFields(in, state.fieldInfos);
+
+      if (version >= Lucene45DocValuesFormat.VERSION_CHECKSUM) {
+        CodecUtil.checkFooter(in);
+      } else {
+        CodecUtil.checkEOF(in);
+      }
 
       success = true;
     } finally {
@@ -103,15 +125,23 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
       }
     }
 
+    String dataName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, dataExtension);
+    this.data = state.directory.openInput(dataName, state.context);
     success = false;
     try {
-      String dataName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, dataExtension);
-      data = state.directory.openInput(dataName, state.context);
       final int version2 = CodecUtil.checkHeader(data, dataCodec, 
                                                  Lucene45DocValuesFormat.VERSION_START,
                                                  Lucene45DocValuesFormat.VERSION_CURRENT);
       if (version != version2) {
         throw new CorruptIndexException("Format versions mismatch");
+      }
+      
+      if (version >= Lucene45DocValuesFormat.VERSION_CHECKSUM) {
+        // NOTE: data file is too costly to verify checksum against all the bytes on open,
+        // but for now we at least verify proper structure of the checksum footer: which looks
+        // for FOOTER_MAGIC + algorithmID. This is cheap and can detect some forms of corruption
+        // such as file truncation.
+        CodecUtil.retrieveChecksum(data);
       }
 
       success = true;
@@ -178,6 +208,11 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
   private void readFields(IndexInput meta, FieldInfos infos) throws IOException {
     int fieldNumber = meta.readVInt();
     while (fieldNumber != -1) {
+      if ((lenientFieldInfoCheck && fieldNumber < 0) || (!lenientFieldInfoCheck && infos.fieldInfo(fieldNumber) == null)) {
+        // trickier to validate more: because we re-use for norms, because we use multiple entries
+        // for "composite" types like sortedset, etc.
+        throw new CorruptIndexException("Invalid field number: " + fieldNumber + " (resource=" + meta + ")");
+      }
       byte type = meta.readByte();
       if (type == Lucene45DocValuesFormat.NUMERIC) {
         numerics.put(fieldNumber, readNumericEntry(meta));
@@ -295,6 +330,13 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
     return ramBytesUsed.get();
   }
   
+  @Override
+  public void checkIntegrity() throws IOException {
+    if (version >= Lucene45DocValuesFormat.VERSION_CHECKSUM) {
+      CodecUtil.checksumEntireFile(data);
+    }
+  }
+
   LongValues getNumeric(NumericEntry entry) throws IOException {
     final IndexInput data = this.data.clone();
     data.seek(entry.offset);
@@ -347,18 +389,20 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
     final IndexInput data = this.data.clone();
 
     return new LongBinaryDocValues() {
+      final BytesRef term;
+      {
+        term = new BytesRef(bytes.maxLength);
+        term.offset = 0;
+        term.length = bytes.maxLength;
+      }
+
       @Override
-      public void get(long id, BytesRef result) {
+      public BytesRef get(long id) {
         long address = bytes.offset + id * bytes.maxLength;
         try {
           data.seek(address);
-          // NOTE: we could have one buffer, but various consumers (e.g. FieldComparatorSource) 
-          // assume "they" own the bytes after calling this!
-          final byte[] buffer = new byte[bytes.maxLength];
-          data.readBytes(buffer, 0, buffer.length);
-          result.bytes = buffer;
-          result.offset = 0;
-          result.length = buffer.length;
+          data.readBytes(term.bytes, 0, term.length);
+          return term;
         } catch (IOException e) {
           throw new RuntimeException(e);
         }
@@ -374,7 +418,7 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
       MonotonicBlockPackedReader addrInstance = addressInstances.get(field.number);
       if (addrInstance == null) {
         data.seek(bytes.addressesOffset);
-        addrInstance = new MonotonicBlockPackedReader(data, bytes.packedIntsVersion, bytes.blockSize, bytes.count, false);
+        addrInstance = MonotonicBlockPackedReader.of(data, bytes.packedIntsVersion, bytes.blockSize, bytes.count, false);
         addressInstances.put(field.number, addrInstance);
         ramBytesUsed.addAndGet(addrInstance.ramBytesUsed() + RamUsageEstimator.NUM_BYTES_INT);
       }
@@ -389,20 +433,18 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
     final MonotonicBlockPackedReader addresses = getAddressInstance(data, field, bytes);
 
     return new LongBinaryDocValues() {
+      final BytesRef term = new BytesRef(Math.max(0, bytes.maxLength));
+
       @Override
-      public void get(long id, BytesRef result) {
+      public BytesRef get(long id) {
         long startAddress = bytes.offset + (id == 0 ? 0 : addresses.get(id-1));
         long endAddress = bytes.offset + addresses.get(id);
         int length = (int) (endAddress - startAddress);
         try {
           data.seek(startAddress);
-          // NOTE: we could have one buffer, but various consumers (e.g. FieldComparatorSource) 
-          // assume "they" own the bytes after calling this!
-          final byte[] buffer = new byte[length];
-          data.readBytes(buffer, 0, buffer.length);
-          result.bytes = buffer;
-          result.offset = 0;
-          result.length = length;
+          data.readBytes(term.bytes, 0, length);
+          term.length = length;
+          return term;
         } catch (IOException e) {
           throw new RuntimeException(e);
         }
@@ -425,7 +467,7 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
         } else {
           size = 1L + bytes.count / interval;
         }
-        addrInstance = new MonotonicBlockPackedReader(data, bytes.packedIntsVersion, bytes.blockSize, size, false);
+        addrInstance = MonotonicBlockPackedReader.of(data, bytes.packedIntsVersion, bytes.blockSize, size, false);
         addressInstances.put(field.number, addrInstance);
         ramBytesUsed.addAndGet(addrInstance.ramBytesUsed() + RamUsageEstimator.NUM_BYTES_INT);
       }
@@ -460,8 +502,8 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
       }
 
       @Override
-      public void lookupOrd(int ord, BytesRef result) {
-        binary.get(ord, result);
+      public BytesRef lookupOrd(int ord) {
+        return binary.get(ord);
       }
 
       @Override
@@ -497,7 +539,7 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
       MonotonicBlockPackedReader ordIndexInstance = ordIndexInstances.get(field.number);
       if (ordIndexInstance == null) {
         data.seek(entry.offset);
-        ordIndexInstance = new MonotonicBlockPackedReader(data, entry.packedIntsVersion, entry.blockSize, entry.count, false);
+        ordIndexInstance = MonotonicBlockPackedReader.of(data, entry.packedIntsVersion, entry.blockSize, entry.count, false);
         ordIndexInstances.put(field.number, ordIndexInstance);
         ramBytesUsed.addAndGet(ordIndexInstance.ramBytesUsed() + RamUsageEstimator.NUM_BYTES_INT);
       }
@@ -505,13 +547,18 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
     }
     return ordIndex;
   }
+  
+  @Override
+  public SortedNumericDocValues getSortedNumeric(FieldInfo field) throws IOException {
+    throw new IllegalStateException("Lucene 4.5 does not support SortedNumeric: how did you pull this off?");
+  }
 
   @Override
   public SortedSetDocValues getSortedSet(FieldInfo field) throws IOException {
     SortedSetEntry ss = sortedSets.get(field.number);
     if (ss.format == SORTED_SET_SINGLE_VALUED_SORTED) {
       final SortedDocValues values = getSorted(field);
-      return new SingletonSortedSetDocValues(values);
+      return DocValues.singleton(values);
     } else if (ss.format != SORTED_SET_WITH_ADDRESSES) {
       throw new AssertionError();
     }
@@ -524,7 +571,8 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
     // but the addresses to the ord stream are in RAM
     final MonotonicBlockPackedReader ordIndex = getOrdIndexInstance(data, field, ordIndexes.get(field.number));
     
-    return new SortedSetDocValues() {
+    return new RandomAccessOrds() {
+      long startOffset;
       long offset;
       long endOffset;
       
@@ -541,13 +589,13 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
 
       @Override
       public void setDocument(int docID) {
-        offset = (docID == 0 ? 0 : ordIndex.get(docID-1));
+        startOffset = offset = (docID == 0 ? 0 : ordIndex.get(docID-1));
         endOffset = ordIndex.get(docID);
       }
 
       @Override
-      public void lookupOrd(long ord, BytesRef result) {
-        binary.get(ord, result);
+      public BytesRef lookupOrd(long ord) {
+        return binary.get(ord);
       }
 
       @Override
@@ -571,6 +619,16 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
         } else {
           return super.termsEnum();
         }
+      }
+
+      @Override
+      public long ordAt(int index) {
+        return ordinals.get(startOffset + index);
+      }
+
+      @Override
+      public int cardinality() {
+        return (int) (endOffset - startOffset);
       }
     };
   }
@@ -604,9 +662,9 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
   public Bits getDocsWithField(FieldInfo field) throws IOException {
     switch(field.getDocValuesType()) {
       case SORTED_SET:
-        return new SortedSetDocsWithField(getSortedSet(field), maxDoc);
+        return DocValues.docsWithValue(getSortedSet(field), maxDoc);
       case SORTED:
-        return new SortedDocsWithField(getSorted(field), maxDoc);
+        return DocValues.docsWithValue(getSorted(field), maxDoc);
       case BINARY:
         BinaryEntry be = binaries.get(field.number);
         return getMissingBits(be.missingOffset);
@@ -676,11 +734,11 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
   // internally we compose complex dv (sorted/sortedset) from other ones
   static abstract class LongBinaryDocValues extends BinaryDocValues {
     @Override
-    public final void get(int docID, BytesRef result) {
-      get((long)docID, result);
+    public final BytesRef get(int docID) {
+      return get((long) docID);
     }
     
-    abstract void get(long id, BytesRef Result);
+    abstract BytesRef get(long id);
   }
   
   // in the compressed case, we add a few additional operations for
@@ -705,13 +763,10 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
     }
     
     @Override
-    public void get(long id, BytesRef result) {
+    public BytesRef get(long id) {
       try {
         termsEnum.seekExact(id);
-        BytesRef term = termsEnum.term();
-        result.bytes = term.bytes;
-        result.offset = term.offset;
-        result.length = term.length;
+        return termsEnum.term();
       } catch (IOException e) {
         throw new RuntimeException(e);
       }
@@ -746,28 +801,18 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
       return new TermsEnum() {
         private long currentOrd = -1;
         // TODO: maxLength is negative when all terms are merged away...
-        private final BytesRef termBuffer = new BytesRef(bytes.maxLength < 0 ? 0 : bytes.maxLength);
-        private final BytesRef term = new BytesRef(); // TODO: paranoia?
+        private final BytesRef term = new BytesRef(bytes.maxLength < 0 ? 0 : bytes.maxLength);
 
         @Override
         public BytesRef next() throws IOException {
-          if (doNext() == null) {
-            return null;
-          } else {
-            setTerm();
-            return term;
-          }
-        }
-        
-        private BytesRef doNext() throws IOException {
           if (++currentOrd >= numValues) {
             return null;
           } else {
             int start = input.readVInt();
             int suffix = input.readVInt();
-            input.readBytes(termBuffer.bytes, start, suffix);
-            termBuffer.length = start + suffix;
-            return termBuffer;
+            input.readBytes(term.bytes, start, suffix);
+            term.length = start + suffix;
+            return term;
           }
         }
 
@@ -780,8 +825,8 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
 
           while (low <= high) {
             long mid = (low + high) >>> 1;
-            doSeek(mid * interval);
-            int cmp = termBuffer.compareTo(text);
+            seekExact(mid * interval);
+            int cmp = term.compareTo(text);
 
             if (cmp < 0) {
               low = mid + 1;
@@ -789,7 +834,6 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
               high = mid - 1;
             } else {
               // we got lucky, found an indexed term
-              setTerm();
               return SeekStatus.FOUND;
             }
           }
@@ -800,15 +844,13 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
           
           // block before insertion point
           long block = low-1;
-          doSeek(block < 0 ? -1 : block * interval);
+          seekExact(block < 0 ? -1 : block * interval);
           
-          while (doNext() != null) {
-            int cmp = termBuffer.compareTo(text);
+          while (next() != null) {
+            int cmp = term.compareTo(text);
             if (cmp == 0) {
-              setTerm();
               return SeekStatus.FOUND;
             } else if (cmp > 0) {
-              setTerm();
               return SeekStatus.NOT_FOUND;
             }
           }
@@ -818,11 +860,6 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
 
         @Override
         public void seekExact(long ord) throws IOException {
-          doSeek(ord);
-          setTerm();
-        }
-        
-        private void doSeek(long ord) throws IOException {
           long block = ord / interval;
 
           if (ord >= currentOrd && block == currentOrd / interval) {
@@ -834,15 +871,8 @@ public class Lucene45DocValuesProducer extends DocValuesProducer implements Clos
           }
           
           while (currentOrd < ord) {
-            doNext();
+            next();
           }
-        }
-        
-        private void setTerm() {
-          // TODO: is there a cleaner way
-          term.bytes = new byte[termBuffer.length];
-          term.offset = 0;
-          term.copyBytes(termBuffer);
         }
 
         @Override

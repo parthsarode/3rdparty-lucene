@@ -23,6 +23,7 @@ import org.apache.lucene.analysis.tokenattributes.FlagsAttribute;
 import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
 import org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
 import org.apache.lucene.analysis.tokenattributes.TypeAttribute;
+import org.apache.lucene.util.AttributeFactory;
 import org.apache.lucene.util.AttributeSource;
 
 import java.io.IOException;
@@ -149,7 +150,7 @@ public final class WikipediaTokenizer extends Tokenizer {
 
   /**
    * Creates a new instance of the {@link org.apache.lucene.analysis.wikipedia.WikipediaTokenizer}.  Attaches the
-   * <code>input</code> to a the newly created JFlex scanner. Uses the given {@link org.apache.lucene.util.AttributeSource.AttributeFactory}.
+   * <code>input</code> to a the newly created JFlex scanner. Uses the given {@link org.apache.lucene.util.AttributeFactory}.
    *
    * @param input The input
    * @param tokenOutput One of {@link #TOKENS_ONLY}, {@link #UNTOKENIZED_ONLY}, {@link #BOTH}
@@ -220,7 +221,7 @@ public final class WikipediaTokenizer extends Tokenizer {
     int lastPos = theStart + numAdded;
     int tmpTokType;
     int numSeen = 0;
-    List<AttributeSource.State> tmp = new ArrayList<AttributeSource.State>();
+    List<AttributeSource.State> tmp = new ArrayList<>();
     setupSavedToken(0, type);
     tmp.add(captureState());
     //while we can get a token and that token is the same type and we have not transitioned to a new wiki-item of the same type

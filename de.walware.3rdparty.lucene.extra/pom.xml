@@ -13,7 +13,7 @@
 	
 	<groupId>de.walware.3rdparty</groupId>
 	<artifactId>de.walware.3rdparty.lucene.extra</artifactId>
-	<version>4.7.2-SNAPSHOT</version>
+	<version>4.10.3-SNAPSHOT</version>
 	<packaging>eclipse-plugin</packaging>
 	
 </project>

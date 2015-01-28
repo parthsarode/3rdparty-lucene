@@ -23,10 +23,6 @@ import java.util.Comparator;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.StringHelper;
 
-// TODO(simonw) -- for cleaner transition, maybe we should make
-// a new SortField that subclasses this one and always uses
-// index values?
-
 /**
  * Stores information about how to sort documents by terms in an individual
  * field.  Fields must be indexed in order to sort by them.
@@ -116,9 +112,6 @@ public class SortField {
   // Used for 'sortMissingFirst/Last'
   public Object missingValue = null;
 
-  // Only used with type=STRING
-  public boolean sortMissingLast;
-
   /** Creates a sort by terms in the given field with the type of term
    * values explicitly given.
    * @param field  Name of field to sort by.  Can be <code>null</code> if
@@ -200,7 +193,7 @@ public class SortField {
     };
 
   public void setMissingValue(Object missingValue) {
-    if (type == Type.STRING) {
+    if (type == Type.STRING || type == Type.STRING_VAL) {
       if (missingValue != STRING_FIRST && missingValue != STRING_LAST) {
         throw new IllegalArgumentException("For STRING type, missing value must be either STRING_FIRST or STRING_LAST");
       }
@@ -433,8 +426,7 @@ public class SortField {
       return new FieldComparator.TermOrdValComparator(numHits, field, missingValue == STRING_LAST);
 
     case STRING_VAL:
-      // TODO: should we remove this?  who really uses it?
-      return new FieldComparator.TermValComparator(numHits, field);
+      return new FieldComparator.TermValComparator(numHits, field, missingValue == STRING_LAST);
 
     case REWRITEABLE:
       throw new IllegalStateException("SortField needs to be rewritten through Sort.rewrite(..) and SortField.rewrite(..)");

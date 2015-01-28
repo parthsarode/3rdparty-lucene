@@ -47,13 +47,13 @@ public class SnapshotDeletionPolicy extends IndexDeletionPolicy {
 
   /** Records how many snapshots are held against each
    *  commit generation */
-  protected Map<Long,Integer> refCounts = new HashMap<Long,Integer>();
+  protected final Map<Long,Integer> refCounts = new HashMap<>();
 
   /** Used to map gen to IndexCommit. */
-  protected Map<Long,IndexCommit> indexCommits = new HashMap<Long,IndexCommit>();
+  protected final Map<Long,IndexCommit> indexCommits = new HashMap<>();
 
   /** Wrapped {@link IndexDeletionPolicy} */
-  private IndexDeletionPolicy primary;
+  private final IndexDeletionPolicy primary;
 
   /** Most recently committed {@link IndexCommit}. */
   protected IndexCommit lastCommit;
@@ -167,7 +167,7 @@ public class SnapshotDeletionPolicy extends IndexDeletionPolicy {
 
   /** Returns all IndexCommits held by at least one snapshot. */
   public synchronized List<IndexCommit> getSnapshots() {
-    return new ArrayList<IndexCommit>(indexCommits.values());
+    return new ArrayList<>(indexCommits.values());
   }
 
   /** Returns the total number of snapshots currently held. */
@@ -187,20 +187,10 @@ public class SnapshotDeletionPolicy extends IndexDeletionPolicy {
     return indexCommits.get(gen);
   }
 
-  @Override
-  public synchronized IndexDeletionPolicy clone() {
-    SnapshotDeletionPolicy other = (SnapshotDeletionPolicy) super.clone();
-    other.primary = this.primary.clone();
-    other.lastCommit = null;
-    other.refCounts = new HashMap<Long,Integer>(refCounts);
-    other.indexCommits = new HashMap<Long,IndexCommit>(indexCommits);
-    return other;
-  }
-
   /** Wraps each {@link IndexCommit} as a {@link
    *  SnapshotCommitPoint}. */
   private List<IndexCommit> wrapCommits(List<? extends IndexCommit> commits) {
-    List<IndexCommit> wrappedCommits = new ArrayList<IndexCommit>(commits.size());
+    List<IndexCommit> wrappedCommits = new ArrayList<>(commits.size());
     for (IndexCommit ic : commits) {
       wrappedCommits.add(new SnapshotCommitPoint(ic));
     }

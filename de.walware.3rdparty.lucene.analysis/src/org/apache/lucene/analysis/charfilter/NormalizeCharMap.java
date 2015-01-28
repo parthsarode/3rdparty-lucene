@@ -24,6 +24,7 @@ import java.util.TreeMap;
 
 import org.apache.lucene.util.CharsRef;
 import org.apache.lucene.util.IntsRef;
+import org.apache.lucene.util.IntsRefBuilder;
 import org.apache.lucene.util.fst.Builder;
 import org.apache.lucene.util.fst.CharSequenceOutputs;
 import org.apache.lucene.util.fst.FST;
@@ -40,7 +41,7 @@ import org.apache.lucene.util.fst.Util;
 public class NormalizeCharMap {
 
   final FST<CharsRef> map;
-  final Map<Character,FST.Arc<CharsRef>> cachedRootArcs = new HashMap<Character,FST.Arc<CharsRef>>();
+  final Map<Character,FST.Arc<CharsRef>> cachedRootArcs = new HashMap<>();
 
   // Use the builder to create:
   private NormalizeCharMap(FST<CharsRef> map) {
@@ -48,7 +49,7 @@ public class NormalizeCharMap {
     if (map != null) {
       try {
         // Pre-cache root arcs:
-        final FST.Arc<CharsRef> scratchArc = new FST.Arc<CharsRef>();
+        final FST.Arc<CharsRef> scratchArc = new FST.Arc<>();
         final FST.BytesReader fstReader = map.getBytesReader();
         map.getFirstArc(scratchArc);
         if (FST.targetHasArcs(scratchArc)) {
@@ -78,7 +79,7 @@ public class NormalizeCharMap {
    */
   public static class Builder {
 
-    private final Map<String,String> pendingPairs = new TreeMap<String,String>();
+    private final Map<String,String> pendingPairs = new TreeMap<>();
 
     /** Records a replacement to be applied to the input
      *  stream.  Whenever <code>singleMatch</code> occurs in
@@ -108,8 +109,8 @@ public class NormalizeCharMap {
       final FST<CharsRef> map;
       try {
         final Outputs<CharsRef> outputs = CharSequenceOutputs.getSingleton();
-        final org.apache.lucene.util.fst.Builder<CharsRef> builder = new org.apache.lucene.util.fst.Builder<CharsRef>(FST.INPUT_TYPE.BYTE2, outputs);
-        final IntsRef scratch = new IntsRef();
+        final org.apache.lucene.util.fst.Builder<CharsRef> builder = new org.apache.lucene.util.fst.Builder<>(FST.INPUT_TYPE.BYTE2, outputs);
+        final IntsRefBuilder scratch = new IntsRefBuilder();
         for(Map.Entry<String,String> ent : pendingPairs.entrySet()) {
           builder.add(Util.toUTF16(ent.getKey(), scratch),
                       new CharsRef(ent.getValue()));

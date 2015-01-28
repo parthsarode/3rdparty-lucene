@@ -35,6 +35,7 @@ import org.apache.lucene.index.NumericDocValues;
 import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.SortedDocValues;
+import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
@@ -92,8 +93,8 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
     
   private class FieldsWriter extends DocValuesConsumer {
 
-    private final Map<DocValuesFormat,ConsumerAndSuffix> formats = new HashMap<DocValuesFormat,ConsumerAndSuffix>();
-    private final Map<String,Integer> suffixes = new HashMap<String,Integer>();
+    private final Map<DocValuesFormat,ConsumerAndSuffix> formats = new HashMap<>();
+    private final Map<String,Integer> suffixes = new HashMap<>();
     
     private final SegmentWriteState segmentWriteState;
     
@@ -114,6 +115,11 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
     @Override
     public void addSortedField(FieldInfo field, Iterable<BytesRef> values, Iterable<Number> docToOrd) throws IOException {
       getInstance(field).addSortedField(field, values, docToOrd);
+    }
+
+    @Override
+    public void addSortedNumericField(FieldInfo field, Iterable<Number> docToValueCount, Iterable<Number> values) throws IOException {
+      getInstance(field).addSortedNumericField(field, docToValueCount, values);
     }
 
     @Override
@@ -209,12 +215,12 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
 
   private class FieldsReader extends DocValuesProducer {
 
-    private final Map<String,DocValuesProducer> fields = new TreeMap<String,DocValuesProducer>();
-    private final Map<String,DocValuesProducer> formats = new HashMap<String,DocValuesProducer>();
+    private final Map<String,DocValuesProducer> fields = new TreeMap<>();
+    private final Map<String,DocValuesProducer> formats = new HashMap<>();
 
     public FieldsReader(final SegmentReadState readState) throws IOException {
 
-      // Read _X.per and init each format:
+      // Init each unique format:
       boolean success = false;
       try {
         // Read field name -> format name
@@ -245,7 +251,7 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
 
     private FieldsReader(FieldsReader other) {
 
-      Map<DocValuesProducer,DocValuesProducer> oldToNew = new IdentityHashMap<DocValuesProducer,DocValuesProducer>();
+      Map<DocValuesProducer,DocValuesProducer> oldToNew = new IdentityHashMap<>();
       // First clone all formats
       for(Map.Entry<String,DocValuesProducer> ent : other.formats.entrySet()) {
         DocValuesProducer values = ent.getValue();
@@ -280,6 +286,12 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
     }
 
     @Override
+    public SortedNumericDocValues getSortedNumeric(FieldInfo field) throws IOException {
+      DocValuesProducer producer = fields.get(field.name);
+      return producer == null ? null : producer.getSortedNumeric(field);
+    }
+
+    @Override
     public SortedSetDocValues getSortedSet(FieldInfo field) throws IOException {
       DocValuesProducer producer = fields.get(field.name);
       return producer == null ? null : producer.getSortedSet(field);
@@ -309,6 +321,13 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
             entry.getValue().ramBytesUsed();
       }
       return size;
+    }
+
+    @Override
+    public void checkIntegrity() throws IOException {
+      for (DocValuesProducer format : formats.values()) {
+        format.checkIntegrity();
+      }
     }
   }
 

@@ -19,6 +19,7 @@ package org.apache.lucene.analysis;
 
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.util.CloseableThreadLocal;
+import org.apache.lucene.util.Version;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -71,9 +72,10 @@ import java.util.Map;
 public abstract class Analyzer implements Closeable {
 
   private final ReuseStrategy reuseStrategy;
+  private Version version = Version.LUCENE_CURRENT;
 
   // non final as it gets nulled if closed; pkg private for access by ReuseStrategy's final helper methods:
-  CloseableThreadLocal<Object> storedValue = new CloseableThreadLocal<Object>();
+  CloseableThreadLocal<Object> storedValue = new CloseableThreadLocal<>();
 
   /**
    * Create a new Analyzer, reusing the same set of components per-thread
@@ -237,6 +239,20 @@ public abstract class Analyzer implements Closeable {
    */
   public final ReuseStrategy getReuseStrategy() {
     return reuseStrategy;
+  }
+
+  /**
+   * Set the version of Lucene this analyzer should mimic the behavior for for analysis.
+   */
+  public void setVersion(Version v) {
+    version = v; // TODO: make write once?
+  }
+
+  /**
+   * Return the version of Lucene this analyzer will mimic the behavior of for analysis.
+   */
+  public Version getVersion() {
+    return version;
   }
 
   /** Frees persistent resources used by this Analyzer */
@@ -448,7 +464,7 @@ public abstract class Analyzer implements Closeable {
     public void setReusableComponents(Analyzer analyzer, String fieldName, TokenStreamComponents components) {
       Map<String, TokenStreamComponents> componentsPerField = (Map<String, TokenStreamComponents>) getStoredValue(analyzer);
       if (componentsPerField == null) {
-        componentsPerField = new HashMap<String, TokenStreamComponents>();
+        componentsPerField = new HashMap<>();
         setStoredValue(analyzer, componentsPerField);
       }
       componentsPerField.put(fieldName, components);

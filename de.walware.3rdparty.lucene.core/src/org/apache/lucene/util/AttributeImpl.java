@@ -19,8 +19,6 @@ package org.apache.lucene.util;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
-import java.lang.ref.WeakReference;
-import java.util.LinkedList;
 
 /**
  * Base class for Attributes that can be added to a 
@@ -91,12 +89,12 @@ public abstract class AttributeImpl implements Cloneable, Attribute {
    */
   public void reflectWith(AttributeReflector reflector) {
     final Class<? extends AttributeImpl> clazz = this.getClass();
-    final LinkedList<WeakReference<Class<? extends Attribute>>> interfaces = AttributeSource.getAttributeInterfaces(clazz);
-    if (interfaces.size() != 1) {
+    final Class<? extends Attribute>[] interfaces = AttributeSource.getAttributeInterfaces(clazz);
+    if (interfaces.length != 1) {
       throw new UnsupportedOperationException(clazz.getName() +
         " implements more than one Attribute interface, the default reflectWith() implementation cannot handle this.");
     }
-    final Class<? extends Attribute> interf = interfaces.getFirst().get();
+    final Class<? extends Attribute> interf = interfaces[0];
     final Field[] fields = clazz.getDeclaredFields();
     try {
       for (int i = 0; i < fields.length; i++) {
@@ -118,10 +116,10 @@ public abstract class AttributeImpl implements Cloneable, Attribute {
    * Attributes this implementation supports.
    */
   public abstract void copyTo(AttributeImpl target);
-    
+
   /**
-   * Shallow clone. Subclasses must override this if they 
-   * need to clone any members deeply,
+   * In most cases the clone is, and should be, deep in order to be able to
+   * properly capture the state of all attributes.
    */
   @Override
   public AttributeImpl clone() {

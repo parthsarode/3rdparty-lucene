@@ -35,6 +35,9 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.QueryBuilder;
 import org.apache.lucene.util.Version;
+import org.apache.lucene.util.automaton.RegExp;
+
+import static org.apache.lucene.util.automaton.Operations.DEFAULT_MAX_DETERMINIZED_STATES;
 
 /** This class is overridden by QueryParser in QueryParser.jj
  * and acts to separate the majority of the Java code from the .jj grammar file. 
@@ -66,7 +69,7 @@ public abstract class QueryParserBase extends QueryBuilder implements CommonQuer
   MultiTermQuery.RewriteMethod multiTermRewriteMethod = MultiTermQuery.CONSTANT_SCORE_AUTO_REWRITE_DEFAULT;
   boolean allowLeadingWildcard = false;
 
-  String field;
+  protected String field;
   int phraseSlop = 0;
   float fuzzyMinSim = FuzzyQuery.defaultMinSimilarity;
   int fuzzyPrefixLength = FuzzyQuery.defaultPrefixLength;
@@ -83,6 +86,7 @@ public abstract class QueryParserBase extends QueryBuilder implements CommonQuer
   boolean analyzeRangeTerms = false;
 
   boolean autoGeneratePhraseQueries;
+  int maxDeterminizedStates = DEFAULT_MAX_DETERMINIZED_STATES;
 
   // So the generated QueryParser(CharStream) won't error out
   protected QueryParserBase() {
@@ -95,13 +99,16 @@ public abstract class QueryParserBase extends QueryBuilder implements CommonQuer
    *  @param a   used to find terms in the query text.
    */
   public void init(Version matchVersion, String f, Analyzer a) {
-    setAnalyzer(a);
-    field = f;
-    if (matchVersion.onOrAfter(Version.LUCENE_31)) {
-      setAutoGeneratePhraseQueries(false);
-    } else {
+    init(f, a);
+    if (matchVersion.onOrAfter(Version.LUCENE_3_1) == false) {
       setAutoGeneratePhraseQueries(true);
     }
+  }
+
+  public void init(String f, Analyzer a) {
+    setAnalyzer(a);
+    field = f;
+    setAutoGeneratePhraseQueries(false);
   }
 
   // the generated parser will create these in QueryParser
@@ -356,7 +363,7 @@ public abstract class QueryParserBase extends QueryBuilder implements CommonQuer
 
     if (fieldToDateResolution == null) {
       // lazily initialize HashMap
-      fieldToDateResolution = new HashMap<String,DateTools.Resolution>();
+      fieldToDateResolution = new HashMap<>();
     }
 
     fieldToDateResolution.put(fieldName, dateResolution);
@@ -403,6 +410,24 @@ public abstract class QueryParserBase extends QueryBuilder implements CommonQuer
    */
   public boolean getAnalyzeRangeTerms() {
     return analyzeRangeTerms;
+  }
+
+  /**
+   * @param maxDeterminizedStates the maximum number of states that
+   *   determinizing a regexp query can result in.  If the query results in any
+   *   more states a TooComplexToDeterminizeException is thrown.
+   */
+  public void setMaxDeterminizedStates(int maxDeterminizedStates) {
+    this.maxDeterminizedStates = maxDeterminizedStates;
+  }
+
+  /**
+   * @return the maximum number of states that determinizing a regexp query
+   *   can result in.  If the query results in any more states a
+   *   TooComplexToDeterminizeException is thrown.
+   */
+  public int getMaxDeterminizedStates() {
+    return maxDeterminizedStates;
   }
 
   protected void addClause(List<BooleanClause> clauses, int conj, int mods, Query q) {
@@ -560,7 +585,8 @@ public abstract class QueryParserBase extends QueryBuilder implements CommonQuer
    * @return new RegexpQuery instance
    */
   protected Query newRegexpQuery(Term regexp) {
-    RegexpQuery query = new RegexpQuery(regexp);
+    RegexpQuery query = new RegexpQuery(regexp, RegExp.ALL,
+      maxDeterminizedStates);
     query.setRewriteMethod(multiTermRewriteMethod);
     return query;
   }

@@ -64,7 +64,6 @@ import org.apache.lucene.analysis.util.OpenStringBuilder;
  * <p>Copyright: Copyright 2008, Luicid Imagination, Inc. </p>
  * <p>Copyright: Copyright 2003, CIIR University of Massachusetts Amherst (http://ciir.cs.umass.edu) </p>
  */
-import org.apache.lucene.util.Version;
 
 /**
  * This class implements the Kstem algorithm
@@ -280,7 +279,7 @@ public class KStemmer {
     DictEntry defaultEntry;
     DictEntry entry;
 
-    CharArrayMap<DictEntry> d = new CharArrayMap<DictEntry>(Version.LUCENE_CURRENT, 1000, false);
+    CharArrayMap<DictEntry> d = new CharArrayMap<>(1000, false);
     for (int i = 0; i < exceptionWords.length; i++) {
       if (!d.containsKey(exceptionWords[i])) {
         entry = new DictEntry(exceptionWords[i], true);
@@ -574,7 +573,7 @@ public class KStemmer {
     return matchedEntry != null;
   }
   
-  // Set<String> lookups = new HashSet<String>();
+  // Set<String> lookups = new HashSet<>();
   
   /* convert past tense (-ed) to present, and `-ied' to `y' */
   private void pastTense() {

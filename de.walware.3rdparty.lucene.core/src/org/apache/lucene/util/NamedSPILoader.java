@@ -59,7 +59,7 @@ public final class NamedSPILoader<S extends NamedSPILoader.NamedSPI> implements 
    * of new service providers on the given classpath/classloader!</em>
    */
   public synchronized void reload(ClassLoader classloader) {
-    final LinkedHashMap<String,S> services = new LinkedHashMap<String,S>(this.services);
+    final LinkedHashMap<String,S> services = new LinkedHashMap<>(this.services);
     final SPIClassIterator<S> loader = SPIClassIterator.get(clazz, classloader);
     while (loader.hasNext()) {
       final Class<? extends S> c = loader.next();
@@ -106,9 +106,9 @@ public final class NamedSPILoader<S extends NamedSPILoader.NamedSPI> implements 
   public S lookup(String name) {
     final S service = services.get(name);
     if (service != null) return service;
-    throw new IllegalArgumentException("A SPI class of type "+clazz.getName()+" with name '"+name+"' does not exist. "+
-     "You need to add the corresponding JAR file supporting this SPI to your classpath."+
-     "The current classpath supports the following names: "+availableServices());
+    throw new IllegalArgumentException("An SPI class of type "+clazz.getName()+" with name '"+name+"' does not exist."+
+     "  You need to add the corresponding JAR file supporting this SPI to your classpath."+
+     "  The current classpath supports the following names: "+availableServices());
   }
 
   public Set<String> availableServices() {

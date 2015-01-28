@@ -33,13 +33,13 @@ import java.util.Set;
 
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.CodecUtil;
+import org.apache.lucene.codecs.DocValuesFormat;
 import org.apache.lucene.codecs.FieldInfosFormat;
 import org.apache.lucene.codecs.LiveDocsFormat;
 import org.apache.lucene.codecs.lucene3x.Lucene3xCodec;
 import org.apache.lucene.codecs.lucene3x.Lucene3xSegmentInfoFormat;
 import org.apache.lucene.codecs.lucene3x.Lucene3xSegmentInfoReader;
 import org.apache.lucene.store.ChecksumIndexInput;
-import org.apache.lucene.store.ChecksumIndexOutput;
 import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
@@ -48,72 +48,82 @@ import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.NoSuchDirectoryException;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.StringHelper;
+import org.apache.lucene.util.Version;
 
 /**
- * A collection of segmentInfo objects with methods for operating on
- * those segments in relation to the file system.
+ * A collection of segmentInfo objects with methods for operating on those
+ * segments in relation to the file system.
  * <p>
  * The active segments in the index are stored in the segment info file,
- * <tt>segments_N</tt>. There may be one or more <tt>segments_N</tt> files in the
- * index; however, the one with the largest generation is the active one (when
- * older segments_N files are present it's because they temporarily cannot be
- * deleted, or, a writer is in the process of committing, or a custom 
- * {@link org.apache.lucene.index.IndexDeletionPolicy IndexDeletionPolicy}
- * is in use). This file lists each segment by name and has details about the
- * codec and generation of deletes.
+ * <tt>segments_N</tt>. There may be one or more <tt>segments_N</tt> files in
+ * the index; however, the one with the largest generation is the active one
+ * (when older segments_N files are present it's because they temporarily cannot
+ * be deleted, or, a writer is in the process of committing, or a custom
+ * {@link org.apache.lucene.index.IndexDeletionPolicy IndexDeletionPolicy} is in
+ * use). This file lists each segment by name and has details about the codec
+ * and generation of deletes.
  * </p>
- * <p>There is also a file <tt>segments.gen</tt>. This file contains
- * the current generation (the <tt>_N</tt> in <tt>segments_N</tt>) of the index.
- * This is used only as a fallback in case the current generation cannot be
- * accurately determined by directory listing alone (as is the case for some NFS
- * clients with time-based directory cache expiration). This file simply contains
- * an {@link DataOutput#writeInt Int32} version header 
- * ({@link #FORMAT_SEGMENTS_GEN_CURRENT}), followed by the
- * generation recorded as {@link DataOutput#writeLong Int64}, written twice.</p>
+ * <p>
+ * There is also a file <tt>segments.gen</tt>. This file contains the current
+ * generation (the <tt>_N</tt> in <tt>segments_N</tt>) of the index. This is
+ * used only as a fallback in case the current generation cannot be accurately
+ * determined by directory listing alone (as is the case for some NFS clients
+ * with time-based directory cache expiration). This file simply contains an
+ * {@link DataOutput#writeInt Int32} version header (
+ * {@link #FORMAT_SEGMENTS_GEN_CURRENT}), followed by the generation recorded as
+ * {@link DataOutput#writeLong Int64}, written twice.
+ * </p>
  * <p>
  * Files:
  * <ul>
- *   <li><tt>segments.gen</tt>: GenHeader, Generation, Generation
- *   <li><tt>segments_N</tt>: Header, Version, NameCounter, SegCount,
- *    &lt;SegName, SegCodec, DelGen, DeletionCount, FieldInfosGen, UpdatesFiles&gt;<sup>SegCount</sup>, 
- *    CommitUserData, Checksum
+ * <li><tt>segments.gen</tt>: GenHeader, Generation, Generation, Footer
+ * <li><tt>segments_N</tt>: Header, Version, NameCounter, SegCount, &lt;SegName,
+ * SegCodec, DelGen, DeletionCount, FieldInfosGen, DocValuesGen,
+ * UpdatesFiles&gt;<sup>SegCount</sup>, CommitUserData, Footer
  * </ul>
  * </p>
  * Data types:
  * <p>
  * <ul>
- *   <li>Header --&gt; {@link CodecUtil#writeHeader CodecHeader}</li>
- *   <li>GenHeader, NameCounter, SegCount, DeletionCount --&gt; {@link DataOutput#writeInt Int32}</li>
- *   <li>Generation, Version, DelGen, Checksum, FieldInfosGen --&gt; {@link DataOutput#writeLong Int64}</li>
- *   <li>SegName, SegCodec --&gt; {@link DataOutput#writeString String}</li>
- *   <li>CommitUserData --&gt; {@link DataOutput#writeStringStringMap Map&lt;String,String&gt;}</li>
- *   <li>UpdatesFiles --&gt; {@link DataOutput#writeStringSet(Set) Set&lt;String&gt;}</li>
+ * <li>Header --&gt; {@link CodecUtil#writeHeader CodecHeader}</li>
+ * <li>GenHeader, NameCounter, SegCount, DeletionCount --&gt;
+ * {@link DataOutput#writeInt Int32}</li>
+ * <li>Generation, Version, DelGen, Checksum, FieldInfosGen, DocValuesGen --&gt;
+ * {@link DataOutput#writeLong Int64}</li>
+ * <li>SegName, SegCodec --&gt; {@link DataOutput#writeString String}</li>
+ * <li>CommitUserData --&gt; {@link DataOutput#writeStringStringMap
+ * Map&lt;String,String&gt;}</li>
+ * <li>UpdatesFiles --&gt; Map&lt;{@link DataOutput#writeInt Int32},
+ * {@link DataOutput#writeStringSet(Set) Set&lt;String&gt;}&gt;</li>
+ * <li>Footer --&gt; {@link CodecUtil#writeFooter CodecFooter}</li>
  * </ul>
  * </p>
  * Field Descriptions:
  * <p>
  * <ul>
- *   <li>Version counts how often the index has been changed by adding or deleting
- *       documents.</li>
- *   <li>NameCounter is used to generate names for new segment files.</li>
- *   <li>SegName is the name of the segment, and is used as the file name prefix for
- *       all of the files that compose the segment's index.</li>
- *   <li>DelGen is the generation count of the deletes file. If this is -1,
- *       there are no deletes. Anything above zero means there are deletes 
- *       stored by {@link LiveDocsFormat}.</li>
- *   <li>DeletionCount records the number of deleted documents in this segment.</li>
- *   <li>Checksum contains the CRC32 checksum of all bytes in the segments_N file up
- *       until the checksum. This is used to verify integrity of the file on opening the
- *       index.</li>
- *   <li>SegCodec is the {@link Codec#getName() name} of the Codec that encoded
- *       this segment.</li>
- *   <li>CommitUserData stores an optional user-supplied opaque
- *       Map&lt;String,String&gt; that was passed to 
- *       {@link IndexWriter#setCommitData(java.util.Map)}.</li>
- *   <li>FieldInfosGen is the generation count of the fieldInfos file. If this is -1,
- *       there are no updates to the fieldInfos in that segment. Anything above zero 
- *       means there are updates to fieldInfos stored by {@link FieldInfosFormat}.</li>
- *   <li>UpdatesFiles stores the list of files that were updated in that segment.</li>
+ * <li>Version counts how often the index has been changed by adding or deleting
+ * documents.</li>
+ * <li>NameCounter is used to generate names for new segment files.</li>
+ * <li>SegName is the name of the segment, and is used as the file name prefix
+ * for all of the files that compose the segment's index.</li>
+ * <li>DelGen is the generation count of the deletes file. If this is -1, there
+ * are no deletes. Anything above zero means there are deletes stored by
+ * {@link LiveDocsFormat}.</li>
+ * <li>DeletionCount records the number of deleted documents in this segment.</li>
+ * <li>SegCodec is the {@link Codec#getName() name} of the Codec that encoded
+ * this segment.</li>
+ * <li>CommitUserData stores an optional user-supplied opaque
+ * Map&lt;String,String&gt; that was passed to
+ * {@link IndexWriter#setCommitData(java.util.Map)}.</li>
+ * <li>FieldInfosGen is the generation count of the fieldInfos file. If this is
+ * -1, there are no updates to the fieldInfos in that segment. Anything above
+ * zero means there are updates to fieldInfos stored by {@link FieldInfosFormat}
+ * .</li>
+ * <li>DocValuesGen is the generation count of the updatable DocValues. If this
+ * is -1, there are no updates to DocValues in that segment. Anything above zero
+ * means there are updates to DocValues stored by {@link DocValuesFormat}.</li>
+ * <li>UpdatesFiles stores the set of files that were updated in that segment
+ * per field.</li>
  * </ul>
  * </p>
  * 
@@ -126,12 +136,23 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
 
   /** The file format version for the segments_N codec header, since 4.6+. */
   public static final int VERSION_46 = 1;
+  
+  /** The file format version for the segments_N codec header, since 4.8+ */
+  public static final int VERSION_48 = 2;
+  
+  /** The file format version for the segments_N codec header, since 4.9+ */
+  public static final int VERSION_49 = 3;
 
-  /** Used for the segments.gen file only!
-   * Whenever you add a new format, make it 1 smaller (negative version logic)! */
-  public static final int FORMAT_SEGMENTS_GEN_CURRENT = -2;
+  // Used for the segments.gen file only!
+  // Whenever you add a new format, make it 1 smaller (negative version logic)!
+  private static final int FORMAT_SEGMENTS_GEN_47 = -2;
+  private static final int FORMAT_SEGMENTS_GEN_CHECKSUM = -3;
+  private static final int FORMAT_SEGMENTS_GEN_START = FORMAT_SEGMENTS_GEN_47;
+  /** Current format of segments.gen */
+  public static final int FORMAT_SEGMENTS_GEN_CURRENT = FORMAT_SEGMENTS_GEN_CHECKSUM;
 
   /** Used to name new segments. */
+  // TODO: should this be a long ...?
   public int counter;
   
   /** Counts how often the index has been changed.  */
@@ -145,7 +166,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
   /** Opaque Map&lt;String, String&gt; that user can specify during IndexWriter.commit */
   public Map<String,String> userData = Collections.<String,String>emptyMap();
   
-  private List<SegmentCommitInfo> segments = new ArrayList<SegmentCommitInfo>();
+  private List<SegmentCommitInfo> segments = new ArrayList<>();
   
   /**
    * If non-null, information about loading segments_N files
@@ -270,6 +291,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
         genOutput.writeInt(FORMAT_SEGMENTS_GEN_CURRENT);
         genOutput.writeLong(generation);
         genOutput.writeLong(generation);
+        CodecUtil.writeFooter(genOutput);
       } finally {
         genOutput.close();
         dir.sync(Collections.singleton(IndexFileNames.SEGMENTS_GEN));
@@ -277,12 +299,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
     } catch (Throwable t) {
       // It's OK if we fail to write this file since it's
       // used only as one of the retry fallbacks.
-      try {
-        dir.deleteFile(IndexFileNames.SEGMENTS_GEN);
-      } catch (Throwable t2) {
-        // Ignore; this file is only used in a retry
-        // fallback on init.
-      }
+      IOUtils.deleteFilesIgnoringExceptions(dir, IndexFileNames.SEGMENTS_GEN);
     }
   }
 
@@ -321,19 +338,20 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
 
     lastGeneration = generation;
 
-    ChecksumIndexInput input = new ChecksumIndexInput(directory.openInput(segmentFileName, IOContext.READ));
+    ChecksumIndexInput input = directory.openChecksumInput(segmentFileName, IOContext.READ);
     try {
       final int format = input.readInt();
+      final int actualFormat;
       if (format == CodecUtil.CODEC_MAGIC) {
         // 4.0+
-        int actualFormat = CodecUtil.checkHeaderNoMagic(input, "segments", VERSION_40, VERSION_46);
+        actualFormat = CodecUtil.checkHeaderNoMagic(input, "segments", VERSION_40, VERSION_49);
         version = input.readLong();
         counter = input.readInt();
         int numSegments = input.readInt();
         if (numSegments < 0) {
           throw new CorruptIndexException("invalid segment count: " + numSegments + " (resource: " + input + ")");
         }
-        for(int seg=0;seg<numSegments;seg++) {
+        for (int seg = 0; seg < numSegments; seg++) {
           String segName = input.readString();
           Codec codec = Codec.forName(input.readString());
           //System.out.println("SIS.read seg=" + seg + " codec=" + codec);
@@ -342,30 +360,57 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
           long delGen = input.readLong();
           int delCount = input.readInt();
           if (delCount < 0 || delCount > info.getDocCount()) {
-            throw new CorruptIndexException("invalid deletion count: " + delCount + " (resource: " + input + ")");
+            throw new CorruptIndexException("invalid deletion count: " + delCount + " vs docCount=" + info.getDocCount() + " (resource: " + input + ")");
           }
           long fieldInfosGen = -1;
           if (actualFormat >= VERSION_46) {
             fieldInfosGen = input.readLong();
           }
-          SegmentCommitInfo siPerCommit = new SegmentCommitInfo(info, delCount, delGen, fieldInfosGen);
+          long dvGen = -1;
+          if (actualFormat >= VERSION_49) {
+            dvGen = input.readLong();
+          } else {
+            dvGen = fieldInfosGen;
+          }
+          SegmentCommitInfo siPerCommit = new SegmentCommitInfo(info, delCount, delGen, fieldInfosGen, dvGen);
           if (actualFormat >= VERSION_46) {
-            int numGensUpdatesFiles = input.readInt();
-            final Map<Long,Set<String>> genUpdatesFiles;
-            if (numGensUpdatesFiles == 0) {
-              genUpdatesFiles = Collections.emptyMap();
-            } else {
-              genUpdatesFiles = new HashMap<Long,Set<String>>(numGensUpdatesFiles);
-              for (int i = 0; i < numGensUpdatesFiles; i++) {
-                genUpdatesFiles.put(input.readLong(), input.readStringSet());
+            if (actualFormat < VERSION_49) {
+              // Recorded per-generation files, which were buggy (see
+              // LUCENE-5636). We need to read and keep them so we continue to
+              // reference those files. Unfortunately it means that the files will
+              // be referenced even if the fields are updated again, until the
+              // segment is merged.
+              final int numGensUpdatesFiles = input.readInt();
+              final Map<Long,Set<String>> genUpdatesFiles;
+              if (numGensUpdatesFiles == 0) {
+                genUpdatesFiles = Collections.emptyMap();
+              } else {
+                genUpdatesFiles = new HashMap<>(numGensUpdatesFiles);
+                for (int i = 0; i < numGensUpdatesFiles; i++) {
+                  genUpdatesFiles.put(input.readLong(), input.readStringSet());
+                }
               }
+              siPerCommit.setGenUpdatesFiles(genUpdatesFiles);
+            } else {
+              siPerCommit.setFieldInfosFiles(input.readStringSet());
+              final Map<Integer,Set<String>> dvUpdateFiles;
+              final int numDVFields = input.readInt();
+              if (numDVFields == 0) {
+                dvUpdateFiles = Collections.emptyMap();
+              } else {
+                dvUpdateFiles = new HashMap<>(numDVFields);
+                for (int i = 0; i < numDVFields; i++) {
+                  dvUpdateFiles.put(input.readInt(), input.readStringSet());
+                }
+              }
+              siPerCommit.setDocValuesUpdatesFiles(dvUpdateFiles);
             }
-            siPerCommit.setGenUpdatesFiles(genUpdatesFiles);
           }
           add(siPerCommit);
         }
         userData = input.readStringStringMap();
       } else {
+        actualFormat = -1;
         Lucene3xSegmentInfoReader.readLegacyInfos(this, directory, input, format);
         Codec codec = Codec.forName("Lucene3x");
         for (SegmentCommitInfo info : this) {
@@ -373,10 +418,15 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
         }
       }
 
-      final long checksumNow = input.getChecksum();
-      final long checksumThen = input.readLong();
-      if (checksumNow != checksumThen) {
-        throw new CorruptIndexException("checksum mismatch in segments file (resource: " + input + ")");
+      if (actualFormat >= VERSION_48) {
+        CodecUtil.checkFooter(input);
+      } else {
+        final long checksumNow = input.getChecksum();
+        final long checksumThen = input.readLong();
+        if (checksumNow != checksumThen) {
+          throw new CorruptIndexException("checksum mismatch in segments file (resource: " + input + ")");
+        }
+        CodecUtil.checkEOF(input);
       }
 
       success = true;
@@ -409,7 +459,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
 
   // Only non-null after prepareCommit has been called and
   // before finishCommit is called
-  ChecksumIndexOutput pendingSegnOutput;
+  IndexOutput pendingSegnOutput;
 
   private static final String SEGMENT_INFO_UPGRADE_CODEC = "SegmentInfo3xUpgrade";
   private static final int SEGMENT_INFO_UPGRADE_VERSION = 0;
@@ -425,14 +475,14 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
       generation++;
     }
     
-    ChecksumIndexOutput segnOutput = null;
+    IndexOutput segnOutput = null;
     boolean success = false;
 
-    final Set<String> upgradedSIFiles = new HashSet<String>();
+    final Set<String> upgradedSIFiles = new HashSet<>();
 
     try {
-      segnOutput = new ChecksumIndexOutput(directory.createOutput(segmentsFileName, IOContext.DEFAULT));
-      CodecUtil.writeHeader(segnOutput, "segments", VERSION_46);
+      segnOutput = directory.createOutput(segmentsFileName, IOContext.DEFAULT);
+      CodecUtil.writeHeader(segnOutput, "segments", VERSION_49);
       segnOutput.writeLong(version); 
       segnOutput.writeInt(counter); // write counter
       segnOutput.writeInt(size()); // write infos
@@ -441,22 +491,32 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
         segnOutput.writeString(si.name);
         segnOutput.writeString(si.getCodec().getName());
         segnOutput.writeLong(siPerCommit.getDelGen());
-        segnOutput.writeInt(siPerCommit.getDelCount());
+        int delCount = siPerCommit.getDelCount();
+        if (delCount < 0 || delCount > si.getDocCount()) {
+          throw new IllegalStateException("cannot write segment: invalid docCount segment=" + si.name + " docCount=" + si.getDocCount() + " delCount=" + delCount);
+        }
+        segnOutput.writeInt(delCount);
         segnOutput.writeLong(siPerCommit.getFieldInfosGen());
-        final Map<Long,Set<String>> genUpdatesFiles = siPerCommit.getUpdatesFiles();
-        segnOutput.writeInt(genUpdatesFiles.size());
-        for (Entry<Long,Set<String>> e : genUpdatesFiles.entrySet()) {
-          segnOutput.writeLong(e.getKey());
+        segnOutput.writeLong(siPerCommit.getDocValuesGen());
+        segnOutput.writeStringSet(siPerCommit.getFieldInfosFiles());
+        final Map<Integer,Set<String>> dvUpdatesFiles = siPerCommit.getDocValuesUpdatesFiles();
+        segnOutput.writeInt(dvUpdatesFiles.size());
+        for (Entry<Integer,Set<String>> e : dvUpdatesFiles.entrySet()) {
+          segnOutput.writeInt(e.getKey());
           segnOutput.writeStringSet(e.getValue());
         }
         assert si.dir == directory;
 
-        assert siPerCommit.getDelCount() <= si.getDocCount();
-
         // If this segment is pre-4.x, perform a one-time
         // "ugprade" to write the .si file for it:
-        String version = si.getVersion();
-        if (version == null || StringHelper.getVersionComparator().compare(version, "4.0") < 0) {
+        Version version = si.getVersion();
+        if (version == null || version.onOrAfter(Version.LUCENE_4_0_0_ALPHA) == false) {
+
+          // Defensive check: we are about to write this SI in 3.x format, dropping all codec information, etc.
+          // so it had better be a 3.x segment or you will get very confusing errors later.
+          if ((si.getCodec() instanceof Lucene3xCodec) == false) {
+            throw new IllegalStateException("cannot write 3x SegmentInfo unless codec is Lucene3x (got: " + si.getCodec() + ")");
+          }
 
           if (!segmentWasUpgraded(directory, si)) {
 
@@ -472,7 +532,6 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
             // kill/crash, OS crash, power loss, etc. while
             // writing the upgraded file, the marker file
             // will be missing:
-            si.addFile(markerFileName);
             IndexOutput out = directory.createOutput(markerFileName, IOContext.DEFAULT);
             try {
               CodecUtil.writeHeader(out, SEGMENT_INFO_UPGRADE_CODEC, SEGMENT_INFO_UPGRADE_VERSION);
@@ -493,21 +552,13 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
         // but suppress any exception:
         IOUtils.closeWhileHandlingException(segnOutput);
 
-        for(String fileName : upgradedSIFiles) {
-          try {
-            directory.deleteFile(fileName);
-          } catch (Throwable t) {
-            // Suppress so we keep throwing the original exception
-          }
+        for (String fileName : upgradedSIFiles) {
+          IOUtils.deleteFilesIgnoringExceptions(directory, fileName);
         }
 
-        try {
-          // Try not to leave a truncated segments_N file in
-          // the index:
-          directory.deleteFile(segmentsFileName);
-        } catch (Throwable t) {
-          // Suppress so we keep throwing the original exception
-        }
+        // Try not to leave a truncated segments_N file in
+        // the index:
+        IOUtils.deleteFilesIgnoringExceptions(directory, segmentsFileName);
       }
     }
   }
@@ -532,9 +583,14 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
     return false;
   }
 
-
   @Deprecated
   public static String write3xInfo(Directory dir, SegmentInfo si, IOContext context) throws IOException {
+
+    // Defensive check: we are about to write this SI in 3.x format, dropping all codec information, etc.
+    // so it had better be a 3.x segment or you will get very confusing errors later.
+    if ((si.getCodec() instanceof Lucene3xCodec) == false) {
+      throw new IllegalStateException("cannot write 3x SegmentInfo unless codec is Lucene3x (got: " + si.getCodec() + ")");
+    }
 
     // NOTE: this is NOT how 3.x is really written...
     String fileName = IndexFileNames.segmentFileName(si.name, "", Lucene3xSegmentInfoFormat.UPGRADED_SI_EXTENSION);
@@ -544,13 +600,10 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
     boolean success = false;
     IndexOutput output = dir.createOutput(fileName, context);
     try {
-      // we are about to write this SI in 3.x format, dropping all codec information, etc.
-      // so it had better be a 3.x segment or you will get very confusing errors later.
-      assert si.getCodec() instanceof Lucene3xCodec : "broken test, trying to mix preflex with other codecs";
       CodecUtil.writeHeader(output, Lucene3xSegmentInfoFormat.UPGRADED_SI_CODEC_NAME, 
                                     Lucene3xSegmentInfoFormat.UPGRADED_SI_VERSION_CURRENT);
       // Write the Lucene version that created this segment, since 3.1
-      output.writeString(si.getVersion());
+      output.writeString(si.getVersion().toString());
       output.writeInt(si.getDocCount());
 
       output.writeStringStringMap(si.attributes());
@@ -583,16 +636,21 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
   
   @Override
   public SegmentInfos clone() {
+    return clone(false);
+  }
+
+  /** Deep clone of this {@code SegmentInfos}, optionally also fully cloning the {@link SegmentInfo}. */
+  SegmentInfos clone(boolean cloneSegmentInfo) {
     try {
       final SegmentInfos sis = (SegmentInfos) super.clone();
       // deep clone, first recreate all collections:
-      sis.segments = new ArrayList<SegmentCommitInfo>(size());
+      sis.segments = new ArrayList<>(size());
       for(final SegmentCommitInfo info : this) {
         assert info.info.getCodec() != null;
         // dont directly access segments, use add method!!!
-        sis.add(info.clone());
+        sis.add(info.clone(cloneSegmentInfo));
       }
-      sis.userData = new HashMap<String,String>(userData);
+      sis.userData = new HashMap<>(userData);
       return sis;
     } catch (CloneNotSupportedException e) {
       throw new RuntimeException("should not happen", e);
@@ -680,7 +738,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
    * commit finishing.
    */
   public abstract static class FindSegmentsFile {
-    
+
     final Directory directory;
 
     /** Sole constructor. */ 
@@ -756,9 +814,9 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
           // a stale cache (NFS) we have a better chance of
           // getting the right generation.
           long genB = -1;
-          IndexInput genInput = null;
+          ChecksumIndexInput genInput = null;
           try {
-            genInput = directory.openInput(IndexFileNames.SEGMENTS_GEN, IOContext.READONCE);
+            genInput = directory.openChecksumInput(IndexFileNames.SEGMENTS_GEN, IOContext.READONCE);
           } catch (IOException e) {
             if (infoStream != null) {
               message("segments.gen open: IOException " + e);
@@ -768,18 +826,23 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
           if (genInput != null) {
             try {
               int version = genInput.readInt();
-              if (version == FORMAT_SEGMENTS_GEN_CURRENT) {
+              if (version == FORMAT_SEGMENTS_GEN_47 || version == FORMAT_SEGMENTS_GEN_CHECKSUM) {
                 long gen0 = genInput.readLong();
                 long gen1 = genInput.readLong();
                 if (infoStream != null) {
                   message("fallback check: " + gen0 + "; " + gen1);
+                }
+                if (version == FORMAT_SEGMENTS_GEN_CHECKSUM) {
+                  CodecUtil.checkFooter(genInput);
+                } else {
+                  CodecUtil.checkEOF(genInput);
                 }
                 if (gen0 == gen1) {
                   // The file is consistent.
                   genB = gen0;
                 }
               } else {
-                throw new IndexFormatTooNewException(genInput, version, FORMAT_SEGMENTS_GEN_CURRENT, FORMAT_SEGMENTS_GEN_CURRENT);
+                throw new IndexFormatTooNewException(genInput, version, FORMAT_SEGMENTS_GEN_START, FORMAT_SEGMENTS_GEN_CURRENT);
               }
             } catch (IOException err2) {
               // rethrow any format exception
@@ -847,6 +910,9 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
           return v;
         } catch (IOException err) {
 
+          // TODO: we should use the new IO apis in Java7 to get better exceptions on why the open failed.  E.g. we don't want to fall back
+          // if the open failed for a "different" reason (too many open files, access denied) than "the commit was in progress"
+
           // Save the original root cause:
           if (exc == null) {
             exc = err;
@@ -867,8 +933,14 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
                                                                                "",
                                                                                gen-1);
 
-            final boolean prevExists;
-            prevExists = directory.fileExists(prevSegmentFileName);
+            boolean prevExists;
+
+            try {
+              directory.openInput(prevSegmentFileName, IOContext.DEFAULT).close();
+              prevExists = true;
+            } catch (IOException ioe) {
+              prevExists = false;
+            }
 
             if (prevExists) {
               if (infoStream != null) {
@@ -904,6 +976,11 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
   void updateGeneration(SegmentInfos other) {
     lastGeneration = other.lastGeneration;
     generation = other.generation;
+  }
+
+  void setGeneration(long generation) {
+    this.generation = generation;
+    this.lastGeneration = generation;
   }
 
   final void rollbackCommit(Directory dir) {
@@ -947,7 +1024,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
    *  The returned collection is recomputed on each
    *  invocation.  */
   public Collection<String> files(Directory dir, boolean includeSegmentsFile) throws IOException {
-    HashSet<String> files = new HashSet<String>();
+    HashSet<String> files = new HashSet<>();
     if (includeSegmentsFile) {
       final String segmentFileName = getSegmentsFileName();
       if (segmentFileName != null) {
@@ -966,13 +1043,15 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
     return files;
   }
 
-  final void finishCommit(Directory dir) throws IOException {
+  /** Returns the committed segments_N filename. */
+  final String finishCommit(Directory dir) throws IOException {
     if (pendingSegnOutput == null) {
       throw new IllegalStateException("prepareCommit was not called");
     }
     boolean success = false;
+    final String dest;
     try {
-      pendingSegnOutput.finishCommit();
+      CodecUtil.writeFooter(pendingSegnOutput);
       success = true;
     } finally {
       if (!success) {
@@ -1011,16 +1090,14 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
       success = true;
     } finally {
       if (!success) {
-        try {
-          dir.deleteFile(fileName);
-        } catch (Throwable t) {
-          // Suppress so we keep throwing the original exception
-        }
+        IOUtils.deleteFilesIgnoringExceptions(dir, fileName);
       }
     }
 
     lastGeneration = generation;
     writeSegmentsGen(dir, generation);
+
+    return fileName;
   }
 
   /** Writes & syncs to the Directory dir, taking care to
@@ -1093,7 +1170,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
   
   /** applies all changes caused by committing a merge to this SegmentInfos */
   void applyMergeChanges(MergePolicy.OneMerge merge, boolean dropSegment) {
-    final Set<SegmentCommitInfo> mergedAway = new HashSet<SegmentCommitInfo>(merge.segments);
+    final Set<SegmentCommitInfo> mergedAway = new HashSet<>(merge.segments);
     boolean inserted = false;
     int newSegIdx = 0;
     for (int segIdx = 0, cnt = segments.size(); segIdx < cnt; segIdx++) {
@@ -1125,7 +1202,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
   }
 
   List<SegmentCommitInfo> createBackupSegmentInfos() {
-    final List<SegmentCommitInfo> list = new ArrayList<SegmentCommitInfo>(size());
+    final List<SegmentCommitInfo> list = new ArrayList<>(size());
     for(final SegmentCommitInfo info : this) {
       assert info.info.getCodec() != null;
       list.add(info.clone());

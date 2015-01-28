@@ -18,7 +18,7 @@ package org.apache.lucene.analysis.core;
  */
 
 import org.apache.lucene.analysis.util.TokenizerFactory;
-import org.apache.lucene.util.AttributeSource.AttributeFactory;
+import org.apache.lucene.util.AttributeFactory;
 
 import java.io.Reader;
 import java.util.Map;
@@ -37,7 +37,6 @@ public class LetterTokenizerFactory extends TokenizerFactory {
   /** Creates a new LetterTokenizerFactory */
   public LetterTokenizerFactory(Map<String,String> args) {
     super(args);
-    assureMatchVersion();
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
@@ -45,6 +44,9 @@ public class LetterTokenizerFactory extends TokenizerFactory {
 
   @Override
   public LetterTokenizer create(AttributeFactory factory, Reader input) {
+    if (luceneMatchVersion == null) {
+      return new LetterTokenizer(factory, input);
+    }
     return new LetterTokenizer(luceneMatchVersion, factory, input);
   }
 }

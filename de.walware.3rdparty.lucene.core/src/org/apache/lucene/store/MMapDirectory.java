@@ -19,17 +19,19 @@ package org.apache.lucene.store;
  
 import java.io.IOException;
 import java.io.File;
-import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException; // javadoc @link
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
+import java.nio.file.StandardOpenOption;
 
 import java.security.AccessController;
 import java.security.PrivilegedExceptionAction;
 import java.security.PrivilegedActionException;
+import java.util.Locale;
 import java.lang.reflect.Method;
 
+import org.apache.lucene.store.ByteBufferIndexInput.BufferCleaner;
 import org.apache.lucene.util.Constants;
 
 /** File-based {@link Directory} implementation that uses
@@ -75,6 +77,7 @@ import org.apache.lucene.util.Constants;
  * blocked on IO. The channel will remain closed and subsequent access
  * to {@link MMapDirectory} will throw a {@link ClosedChannelException}. 
  * </p>
+ * @see <a href="http://blog.thetaphi.de/2012/07/use-lucenes-mmapdirectory-on-64bit.html">Blog post about MMapDirectory</a>
  */
 public class MMapDirectory extends FSDirectory {
   private boolean useUnmapHack = UNMAP_SUPPORTED;
@@ -189,82 +192,20 @@ public class MMapDirectory extends FSDirectory {
   @Override
   public IndexInput openInput(String name, IOContext context) throws IOException {
     ensureOpen();
-    File f = new File(getDirectory(), name);
-    RandomAccessFile raf = new RandomAccessFile(f, "r");
-    try {
-      return new MMapIndexInput("MMapIndexInput(path=\"" + f + "\")", raf);
-    } finally {
-      raf.close();
+    File file = new File(getDirectory(), name);
+    try (FileChannel c = FileChannel.open(file.toPath(), StandardOpenOption.READ)) {
+      final String resourceDescription = "MMapIndexInput(path=\"" + file.toString() + "\")";
+      final boolean useUnmap = getUseUnmap();
+      return ByteBufferIndexInput.newInstance(resourceDescription,
+          map(resourceDescription, c, 0, c.size()), 
+          c.size(), chunkSizePower, useUnmap ? CLEANER : null, useUnmap);
     }
-  }
-  
-  @Override
-  public IndexInputSlicer createSlicer(String name, IOContext context) throws IOException {
-    final MMapIndexInput full = (MMapIndexInput) openInput(name, context);
-    return new IndexInputSlicer() {
-      @Override
-      public IndexInput openSlice(String sliceDescription, long offset, long length) throws IOException {
-        ensureOpen();
-        return full.slice(sliceDescription, offset, length);
-      }
-      
-      @Override
-      public IndexInput openFullSlice() throws IOException {
-        ensureOpen();
-        return full.clone();
-      }
-
-      @Override
-      public void close() throws IOException {
-        full.close();
-      }
-    };
   }
 
-  private final class MMapIndexInput extends ByteBufferIndexInput {
-    private final boolean useUnmapHack;
-    
-    MMapIndexInput(String resourceDescription, RandomAccessFile raf) throws IOException {
-      super(resourceDescription, map(raf, 0, raf.length()), raf.length(), chunkSizePower, getUseUnmap());
-      this.useUnmapHack = getUseUnmap();
-    }
-    
-    /**
-     * Try to unmap the buffer, this method silently fails if no support
-     * for that in the JVM. On Windows, this leads to the fact,
-     * that mmapped files cannot be modified or deleted.
-     */
-    @Override
-    protected void freeBuffer(final ByteBuffer buffer) throws IOException {
-      if (useUnmapHack) {
-        try {
-          AccessController.doPrivileged(new PrivilegedExceptionAction<Void>() {
-            @Override
-            public Void run() throws Exception {
-              final Method getCleanerMethod = buffer.getClass()
-                .getMethod("cleaner");
-              getCleanerMethod.setAccessible(true);
-              final Object cleaner = getCleanerMethod.invoke(buffer);
-              if (cleaner != null) {
-                cleaner.getClass().getMethod("clean")
-                  .invoke(cleaner);
-              }
-              return null;
-            }
-          });
-        } catch (PrivilegedActionException e) {
-          final IOException ioe = new IOException("unable to unmap the mapped buffer");
-          ioe.initCause(e.getCause());
-          throw ioe;
-        }
-      }
-    }
-  }
-  
   /** Maps a file into a set of buffers */
-  ByteBuffer[] map(RandomAccessFile raf, long offset, long length) throws IOException {
+  final ByteBuffer[] map(String resourceDescription, FileChannel fc, long offset, long length) throws IOException {
     if ((length >>> chunkSizePower) >= Integer.MAX_VALUE)
-      throw new IllegalArgumentException("RandomAccessFile too big for chunk size: " + raf.toString());
+      throw new IllegalArgumentException("RandomAccessFile too big for chunk size: " + resourceDescription);
     
     final long chunkSize = 1L << chunkSizePower;
     
@@ -274,16 +215,74 @@ public class MMapDirectory extends FSDirectory {
     ByteBuffer buffers[] = new ByteBuffer[nrBuffers];
     
     long bufferStart = 0L;
-    FileChannel rafc = raf.getChannel();
     for (int bufNr = 0; bufNr < nrBuffers; bufNr++) { 
       int bufSize = (int) ( (length > (bufferStart + chunkSize))
           ? chunkSize
               : (length - bufferStart)
           );
-      buffers[bufNr] = rafc.map(MapMode.READ_ONLY, offset + bufferStart, bufSize);
+      try {
+        buffers[bufNr] = fc.map(MapMode.READ_ONLY, offset + bufferStart, bufSize);
+      } catch (IOException ioe) {
+        throw convertMapFailedIOException(ioe, resourceDescription, bufSize);
+      }
       bufferStart += bufSize;
     }
     
     return buffers;
   }
+  
+  private IOException convertMapFailedIOException(IOException ioe, String resourceDescription, int bufSize) {
+    final String originalMessage;
+    final Throwable originalCause;
+    if (ioe.getCause() instanceof OutOfMemoryError) {
+      // nested OOM confuses users, because its "incorrect", just print a plain message:
+      originalMessage = "Map failed";
+      originalCause = null;
+    } else {
+      originalMessage = ioe.getMessage();
+      originalCause = ioe.getCause();
+    }
+    final String moreInfo;
+    if (!Constants.JRE_IS_64BIT) {
+      moreInfo = "MMapDirectory should only be used on 64bit platforms, because the address space on 32bit operating systems is too small. ";
+    } else if (Constants.WINDOWS) {
+      moreInfo = "Windows is unfortunately very limited on virtual address space. If your index size is several hundred Gigabytes, consider changing to Linux. ";
+    } else if (Constants.LINUX) {
+      moreInfo = "Please review 'ulimit -v', 'ulimit -m' (both should return 'unlimited'), and 'sysctl vm.max_map_count'. ";
+    } else {
+      moreInfo = "Please review 'ulimit -v', 'ulimit -m' (both should return 'unlimited'). ";
+    }
+    final IOException newIoe = new IOException(String.format(Locale.ENGLISH,
+        "%s: %s [this may be caused by lack of enough unfragmented virtual address space "+
+        "or too restrictive virtual memory limits enforced by the operating system, "+
+        "preventing us to map a chunk of %d bytes. %sMore information: "+
+        "http://blog.thetaphi.de/2012/07/use-lucenes-mmapdirectory-on-64bit.html]",
+        originalMessage, resourceDescription, bufSize, moreInfo), originalCause);
+    newIoe.setStackTrace(ioe.getStackTrace());
+    return newIoe;
+  }
+  
+  private static final BufferCleaner CLEANER = new BufferCleaner() {
+    @Override
+    public void freeBuffer(final ByteBufferIndexInput parent, final ByteBuffer buffer) throws IOException {
+      try {
+        AccessController.doPrivileged(new PrivilegedExceptionAction<Void>() {
+          @Override
+          public Void run() throws Exception {
+            final Method getCleanerMethod = buffer.getClass()
+              .getMethod("cleaner");
+            getCleanerMethod.setAccessible(true);
+            final Object cleaner = getCleanerMethod.invoke(buffer);
+            if (cleaner != null) {
+              cleaner.getClass().getMethod("clean")
+                .invoke(cleaner);
+            }
+            return null;
+          }
+        });
+      } catch (PrivilegedActionException e) {
+        throw new IOException("Unable to unmap the mapped buffer: " + parent.toString(), e.getCause());
+      }
+    }
+  };
 }

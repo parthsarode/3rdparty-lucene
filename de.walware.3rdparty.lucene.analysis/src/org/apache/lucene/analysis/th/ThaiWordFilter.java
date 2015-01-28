@@ -42,19 +42,16 @@ import org.apache.lucene.util.Version;
  *    It is known to work with Sun/Oracle and Harmony JREs.
  *    If your application needs to be fully portable, consider using ICUTokenizer instead,
  *    which uses an ICU Thai BreakIterator that will always be available.
+ * @deprecated Use {@link ThaiTokenizer} instead.
  */
+@Deprecated
 public final class ThaiWordFilter extends TokenFilter {
   /** 
    * True if the JRE supports a working dictionary-based breakiterator for Thai.
    * If this is false, this filter will not work at all!
    */
-  public static final boolean DBBI_AVAILABLE;
+  public static final boolean DBBI_AVAILABLE = ThaiTokenizer.DBBI_AVAILABLE;
   private static final BreakIterator proto = BreakIterator.getWordInstance(new Locale("th"));
-  static {
-    // check that we have a working dictionary-based break iterator for thai
-    proto.setText("ภาษาไทย");
-    DBBI_AVAILABLE = proto.isBoundary(4);
-  }
   private final BreakIterator breaker = (BreakIterator) proto.clone();
   private final CharArrayIterator charIterator = CharArrayIterator.newWordInstance();
   
@@ -71,12 +68,20 @@ public final class ThaiWordFilter extends TokenFilter {
   private boolean hasIllegalOffsets = false; // only if the length changed before this filter
 
   /** Creates a new ThaiWordFilter with the specified match version. */
+  public ThaiWordFilter(TokenStream input) {
+    this(Version.LATEST, input);
+  }
+
+  /**
+   * @deprecated Use {@link #ThaiWordFilter(TokenStream)}
+   */
+  @Deprecated
   public ThaiWordFilter(Version matchVersion, TokenStream input) {
-    super(matchVersion.onOrAfter(Version.LUCENE_31) ?
-      input : new LowerCaseFilter(matchVersion, input));
+    super(matchVersion.onOrAfter(Version.LUCENE_3_1) ?
+        input : new LowerCaseFilter(matchVersion, input));
     if (!DBBI_AVAILABLE)
       throw new UnsupportedOperationException("This JRE does not have support for Thai segmentation");
-    handlePosIncr = matchVersion.onOrAfter(Version.LUCENE_31);
+    handlePosIncr = matchVersion.onOrAfter(Version.LUCENE_3_1);
   }
   
   @Override

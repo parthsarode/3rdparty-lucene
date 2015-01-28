@@ -17,10 +17,10 @@ package org.apache.lucene.store;
  * limitations under the License.
  */
 
-import java.io.EOFException;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.Closeable;
+import java.nio.file.NoSuchFileException;
 import java.util.Collection; // for javadocs
 
 import org.apache.lucene.util.IOUtils;
@@ -52,7 +52,10 @@ public abstract class Directory implements Closeable {
    */
   public abstract String[] listAll() throws IOException;
 
-  /** Returns true iff a file with the given name exists. */
+  /** Returns true iff a file with the given name exists.
+   *
+   *  @deprecated This method will be removed in 5.0 */
+  @Deprecated
   public abstract boolean fileExists(String name)
        throws IOException;
 
@@ -64,8 +67,8 @@ public abstract class Directory implements Closeable {
    * Returns the length of a file in the directory. This method follows the
    * following contract:
    * <ul>
-   * <li>Must throw {@link FileNotFoundException} if the file does not exist
-   * (not {@code java.nio.file.NoSuchFileException} of Java 7).
+   * <li>Throws {@link FileNotFoundException} or {@link NoSuchFileException}
+   * if the file does not exist.
    * <li>Returns a value &ge;0 if the file exists, which specifies its length.
    * </ul>
    * 
@@ -100,10 +103,15 @@ public abstract class Directory implements Closeable {
    * the only Directory implementations that respect this
    * parameter are {@link FSDirectory} and {@link
    * CompoundFileDirectory}.
-   * <li>Must throw {@link FileNotFoundException} if the file does not exist
-   * (not {@code java.nio.file.NoSuchFileException} of Java 7).
+   * <p>Throws {@link FileNotFoundException} or {@link NoSuchFileException}
+   * if the file does not exist.
    */
-  public abstract IndexInput openInput(String name, IOContext context) throws IOException; 
+  public abstract IndexInput openInput(String name, IOContext context) throws IOException;
+  
+  /** Returns a stream reading an existing file, computing checksum as it reads */
+  public ChecksumIndexInput openChecksumInput(String name, IOContext context) throws IOException {
+    return new BufferedChecksumIndexInput(openInput(name, context));
+  }
   
   /** Construct a {@link Lock}.
    * @param name the name of the lock file
@@ -179,149 +187,28 @@ public abstract class Directory implements Closeable {
   public void copy(Directory to, String src, String dest, IOContext context) throws IOException {
     IndexOutput os = null;
     IndexInput is = null;
-    IOException priorException = null;
+    boolean success = false;
     try {
       os = to.createOutput(dest, context);
       is = openInput(src, context);
       os.copyBytes(is, is.length());
-    } catch (IOException ioe) {
-      priorException = ioe;
+      success = true;
     } finally {
-      boolean success = false;
-      try {
-        IOUtils.closeWhileHandlingException(priorException, os, is);
-        success = true;
-      } finally {
-        if (!success) {
-          try {
-            to.deleteFile(dest);
-          } catch (Throwable t) {
-          }
+      if (success) {
+        IOUtils.close(os, is);
+      } else {
+        IOUtils.closeWhileHandlingException(os, is);
+        try {
+          to.deleteFile(dest);
+        } catch (Throwable t) {
         }
       }
     }
   }
 
   /**
-   * Creates an {@link IndexInputSlicer} for the given file name.
-   * IndexInputSlicer allows other {@link Directory} implementations to
-   * efficiently open one or more sliced {@link IndexInput} instances from a
-   * single file handle. The underlying file handle is kept open until the
-   * {@link IndexInputSlicer} is closed.
-   * <li>Must throw {@link FileNotFoundException} if the file does not exist
-   * (not {@code java.nio.file.NoSuchFileException} of Java 7).
-   *
-   * @throws IOException
-   *           if an {@link IOException} occurs
-   * @lucene.internal
-   * @lucene.experimental
-   */
-  public IndexInputSlicer createSlicer(final String name, final IOContext context) throws IOException {
-    ensureOpen();
-    return new IndexInputSlicer() {
-      private final IndexInput base = Directory.this.openInput(name, context);
-      @Override
-      public IndexInput openSlice(String sliceDescription, long offset, long length) {
-        return new SlicedIndexInput("SlicedIndexInput(" + sliceDescription + " in " + base + ")", base, offset, length);
-      }
-      @Override
-      public void close() throws IOException {
-        base.close();
-      }
-      @Override
-      public IndexInput openFullSlice() {
-        return base.clone();
-      }
-    };
-  }
-
-  /**
    * @throws AlreadyClosedException if this Directory is closed
    */
   protected void ensureOpen() throws AlreadyClosedException {}
-  
-  /**
-   * Allows to create one or more sliced {@link IndexInput} instances from a single 
-   * file handle. Some {@link Directory} implementations may be able to efficiently map slices of a file
-   * into memory when only certain parts of a file are required.   
-   * @lucene.internal
-   * @lucene.experimental
-   */
-  public abstract class IndexInputSlicer implements Closeable {
-    /**
-     * Returns an {@link IndexInput} slice starting at the given offset with the given length.
-     */
-    public abstract IndexInput openSlice(String sliceDescription, long offset, long length) throws IOException;
 
-    /**
-     * Returns an {@link IndexInput} slice starting at offset <i>0</i> with a
-     * length equal to the length of the underlying file
-     * @deprecated Only for reading CFS files from 3.x indexes.
-     */
-    @Deprecated
-    // can we remove this somehow?
-    public abstract IndexInput openFullSlice() throws IOException;
-  }
-  
-  /** Implementation of an IndexInput that reads from a portion of
-   *  a file.
-   */
-  private static final class SlicedIndexInput extends BufferedIndexInput {
-    IndexInput base;
-    long fileOffset;
-    long length;
-    
-    SlicedIndexInput(final String sliceDescription, final IndexInput base, final long fileOffset, final long length) {
-      this(sliceDescription, base, fileOffset, length, BufferedIndexInput.BUFFER_SIZE);
-    }
-    
-    SlicedIndexInput(final String sliceDescription, final IndexInput base, final long fileOffset, final long length, int readBufferSize) {
-      super("SlicedIndexInput(" + sliceDescription + " in " + base + " slice=" + fileOffset + ":" + (fileOffset+length) + ")", readBufferSize);
-      this.base = base.clone();
-      this.fileOffset = fileOffset;
-      this.length = length;
-    }
-    
-    @Override
-    public SlicedIndexInput clone() {
-      SlicedIndexInput clone = (SlicedIndexInput)super.clone();
-      clone.base = base.clone();
-      clone.fileOffset = fileOffset;
-      clone.length = length;
-      return clone;
-    }
-    
-    /** Expert: implements buffer refill.  Reads bytes from the current
-     *  position in the input.
-     * @param b the array to read bytes into
-     * @param offset the offset in the array to start storing bytes
-     * @param len the number of bytes to read
-     */
-    @Override
-    protected void readInternal(byte[] b, int offset, int len) throws IOException {
-      long start = getFilePointer();
-      if(start + len > length)
-        throw new EOFException("read past EOF: " + this);
-      base.seek(fileOffset + start);
-      base.readBytes(b, offset, len, false);
-    }
-    
-    /** Expert: implements seek.  Sets current position in this file, where
-     *  the next {@link #readInternal(byte[],int,int)} will occur.
-     * @see #readInternal(byte[],int,int)
-     */
-    @Override
-    protected void seekInternal(long pos) {}
-    
-    /** Closes the stream to further operations. */
-    @Override
-    public void close() throws IOException {
-      base.close();
-    }
-    
-    @Override
-    public long length() {
-      return length;
-    }
-  }
 }

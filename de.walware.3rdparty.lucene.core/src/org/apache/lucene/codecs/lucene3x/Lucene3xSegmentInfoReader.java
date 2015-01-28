@@ -18,6 +18,7 @@ package org.apache.lucene.codecs.lucene3x;
  */
 
 import java.io.IOException;
+import java.text.ParseException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -26,17 +27,19 @@ import java.util.Set;
 
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.SegmentInfoReader;
+import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.IndexFileNames;
 import org.apache.lucene.index.IndexFormatTooNewException;
 import org.apache.lucene.index.IndexFormatTooOldException;
-import org.apache.lucene.index.SegmentInfo;
 import org.apache.lucene.index.SegmentCommitInfo;
+import org.apache.lucene.index.SegmentInfo;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.store.CompoundFileDirectory;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.Version;
 
 /**
  * Lucene 3x implementation of {@link SegmentInfoReader}.
@@ -80,12 +83,12 @@ public class Lucene3xSegmentInfoReader extends SegmentInfoReader {
         // Above call succeeded, so it's a 3.0 segment. Upgrade it so the next
         // time the segment is read, its version won't be null and we won't
         // need to open FieldsReader every time for each such segment.
-        si.setVersion("3.0");
+        si.setVersion(Version.LUCENE_3_0_0);
       } else if (si.getVersion().equals("2.x")) {
         // If it's a 3x index touched by 3.1+ code, then segments record their
         // version, whether they are 2.x ones or not. We detect that and throw
         // appropriate exception.
-        throw new IndexFormatTooOldException("segment " + si.name + " in resource " + input, si.getVersion());
+        throw new IndexFormatTooOldException("segment " + si.name + " in resource " + input, si.getVersion().toString());
       }
       infos.add(siPerCommit);
     }
@@ -132,9 +135,13 @@ public class Lucene3xSegmentInfoReader extends SegmentInfoReader {
       throw new IndexFormatTooNewException(input, format,
                                            Lucene3xSegmentInfoFormat.FORMAT_DIAGNOSTICS, Lucene3xSegmentInfoFormat.FORMAT_3_1);
     }
-    final String version;
+    final Version version;
     if (format <= Lucene3xSegmentInfoFormat.FORMAT_3_1) {
-      version = input.readString();
+      try {
+        version = Version.parse(input.readString());
+      } catch (ParseException pe) {
+        throw new CorruptIndexException("unable to parse version string (input: " + input + "): " + pe.getMessage(), pe);
+      }
     } else {
       version = null;
     }
@@ -145,7 +152,7 @@ public class Lucene3xSegmentInfoReader extends SegmentInfoReader {
     final long delGen = input.readLong();
     
     final int docStoreOffset = input.readInt();
-    final Map<String,String> attributes = new HashMap<String,String>();
+    final Map<String,String> attributes = new HashMap<>();
     
     // parse the docstore stuff and shove it into attributes
     final String docStoreSegment;
@@ -172,7 +179,7 @@ public class Lucene3xSegmentInfoReader extends SegmentInfoReader {
     if (numNormGen == SegmentInfo.NO) {
       normGen = null;
     } else {
-      normGen = new HashMap<Integer, Long>();
+      normGen = new HashMap<>();
       for(int j=0;j<numNormGen;j++) {
         normGen.put(j, input.readLong());
       }
@@ -192,7 +199,7 @@ public class Lucene3xSegmentInfoReader extends SegmentInfoReader {
     }
 
     // Replicate logic from 3.x's SegmentInfo.files():
-    final Set<String> files = new HashSet<String>();
+    final Set<String> files = new HashSet<>();
     if (isCompoundFile) {
       files.add(IndexFileNames.segmentFileName(name, "", IndexFileNames.COMPOUND_FILE_EXTENSION));
     } else {
@@ -244,7 +251,7 @@ public class Lucene3xSegmentInfoReader extends SegmentInfoReader {
                                        null, diagnostics, Collections.unmodifiableMap(attributes));
     info.setFiles(files);
 
-    SegmentCommitInfo infoPerCommit = new SegmentCommitInfo(info, delCount, delGen, -1);
+    SegmentCommitInfo infoPerCommit = new SegmentCommitInfo(info, delCount, delGen, -1, -1);
     return infoPerCommit;
   }
 
@@ -252,7 +259,12 @@ public class Lucene3xSegmentInfoReader extends SegmentInfoReader {
     CodecUtil.checkHeader(input, Lucene3xSegmentInfoFormat.UPGRADED_SI_CODEC_NAME,
                                  Lucene3xSegmentInfoFormat.UPGRADED_SI_VERSION_START,
                                  Lucene3xSegmentInfoFormat.UPGRADED_SI_VERSION_CURRENT);
-    final String version = input.readString();
+    final Version version;
+    try {
+      version = Version.parse(input.readString());
+    } catch (ParseException pe) {
+      throw new CorruptIndexException("unable to parse version string (input: " + input + "): " + pe.getMessage(), pe);
+    }
 
     final int docCount = input.readInt();
     

@@ -29,7 +29,7 @@ package org.apache.lucene.util;
  * @lucene.internal
 */
 public abstract class PriorityQueue<T> {
-  private int size;
+  private int size = 0;
   private final int maxSize;
   private final T[] heap;
 
@@ -37,32 +37,24 @@ public abstract class PriorityQueue<T> {
     this(maxSize, true);
   }
 
-  @SuppressWarnings("unchecked")
   public PriorityQueue(int maxSize, boolean prepopulate) {
-    size = 0;
-    int heapSize;
+    final int heapSize;
     if (0 == maxSize) {
       // We allocate 1 extra to avoid if statement in top()
       heapSize = 2;
     } else {
-      if (maxSize > ArrayUtil.MAX_ARRAY_LENGTH) {
-        // Don't wrap heapSize to -1, in this case, which
-        // causes a confusing NegativeArraySizeException.
-        // Note that very likely this will simply then hit
-        // an OOME, but at least that's more indicative to
-        // caller that this values is too big.  We don't +1
-        // in this case, but it's very unlikely in practice
-        // one will actually insert this many objects into
-        // the PQ:
+      // NOTE: we add +1 because all access to heap is
+      // 1-based not 0-based.  heap[0] is unused.
+      heapSize = maxSize + 1;
+
+      if (heapSize > ArrayUtil.MAX_ARRAY_LENGTH) {
         // Throw exception to prevent confusing OOME:
-        throw new IllegalArgumentException("maxSize must be <= " + ArrayUtil.MAX_ARRAY_LENGTH + "; got: " + maxSize);
-      } else {
-        // NOTE: we add +1 because all access to heap is
-        // 1-based not 0-based.  heap[0] is unused.
-        heapSize = maxSize + 1;
+        throw new IllegalArgumentException("maxSize must be <= " + (ArrayUtil.MAX_ARRAY_LENGTH-1) + "; got: " + maxSize);
       }
     }
-    heap = (T[]) new Object[heapSize]; // T is unbounded type, so this unchecked cast works always
+    // T is unbounded type, so this unchecked cast works always:
+    @SuppressWarnings("unchecked") final T[] h = (T[]) new Object[heapSize];
+    this.heap = h;
     this.maxSize = maxSize;
     
     if (prepopulate) {

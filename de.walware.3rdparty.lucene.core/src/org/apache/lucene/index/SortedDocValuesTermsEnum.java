@@ -22,6 +22,7 @@ import java.util.Comparator;
 
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.BytesRefBuilder;
 
 /** Implements a {@link TermsEnum} wrapping a provided
  * {@link SortedDocValues}. */
@@ -29,11 +30,13 @@ import org.apache.lucene.util.BytesRef;
 class SortedDocValuesTermsEnum extends TermsEnum {
   private final SortedDocValues values;
   private int currentOrd = -1;
-  private final BytesRef term = new BytesRef();
+  private BytesRef term;
+  private final BytesRefBuilder scratch;
 
   /** Creates a new TermsEnum over the provided values */
   public SortedDocValuesTermsEnum(SortedDocValues values) {
     this.values = values;
+    scratch = new BytesRefBuilder();
   }
 
   @Override
@@ -41,12 +44,8 @@ class SortedDocValuesTermsEnum extends TermsEnum {
     int ord = values.lookupTerm(text);
     if (ord >= 0) {
       currentOrd = ord;
-      term.offset = 0;
-      // TODO: is there a cleaner way?
-      // term.bytes may be pointing to codec-private byte[]
-      // storage, so we must force new byte[] allocation:
-      term.bytes = new byte[text.length];
-      term.copyBytes(text);
+      scratch.copyBytes(text);
+      term = scratch.get();
       return SeekStatus.FOUND;
     } else {
       currentOrd = -ord-1;
@@ -54,7 +53,7 @@ class SortedDocValuesTermsEnum extends TermsEnum {
         return SeekStatus.END;
       } else {
         // TODO: hmm can we avoid this "extra" lookup?:
-        values.lookupOrd(currentOrd, term);
+        term = values.lookupOrd(currentOrd);
         return SeekStatus.NOT_FOUND;
       }
     }
@@ -64,13 +63,9 @@ class SortedDocValuesTermsEnum extends TermsEnum {
   public boolean seekExact(BytesRef text) throws IOException {
     int ord = values.lookupTerm(text);
     if (ord >= 0) {
-      term.offset = 0;
-      // TODO: is there a cleaner way?
-      // term.bytes may be pointing to codec-private byte[]
-      // storage, so we must force new byte[] allocation:
-      term.bytes = new byte[text.length];
-      term.copyBytes(text);
       currentOrd = ord;
+      scratch.copyBytes(text);
+      term = scratch.get();
       return true;
     } else {
       return false;
@@ -81,7 +76,7 @@ class SortedDocValuesTermsEnum extends TermsEnum {
   public void seekExact(long ord) throws IOException {
     assert ord >= 0 && ord < values.getValueCount();
     currentOrd = (int) ord;
-    values.lookupOrd(currentOrd, term);
+    term = values.lookupOrd(currentOrd);
   }
 
   @Override
@@ -90,7 +85,7 @@ class SortedDocValuesTermsEnum extends TermsEnum {
     if (currentOrd >= values.getValueCount()) {
       return null;
     }
-    values.lookupOrd(currentOrd, term);
+    term = values.lookupOrd(currentOrd);
     return term;
   }
 

@@ -17,8 +17,9 @@ package org.apache.lucene.analysis.util;
  * limitations under the License.
  */
 
+import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.Tokenizer;
-import org.apache.lucene.util.AttributeSource.AttributeFactory;
+import org.apache.lucene.util.AttributeFactory;
 
 import java.io.Reader;
 import java.util.Map;
@@ -31,7 +32,7 @@ import java.util.Set;
 public abstract class TokenizerFactory extends AbstractAnalysisFactory {
 
   private static final AnalysisSPILoader<TokenizerFactory> loader =
-      new AnalysisSPILoader<TokenizerFactory>(TokenizerFactory.class);
+      new AnalysisSPILoader<>(TokenizerFactory.class);
   
   /** looks up a tokenizer by name from context classpath */
   public static TokenizerFactory forName(String name, Map<String,String> args) {
@@ -72,7 +73,7 @@ public abstract class TokenizerFactory extends AbstractAnalysisFactory {
 
   /** Creates a TokenStream of the specified input using the default attribute factory. */
   public final Tokenizer create(Reader input) {
-    return create(AttributeFactory.DEFAULT_ATTRIBUTE_FACTORY, input);
+    return create(TokenStream.DEFAULT_TOKEN_ATTRIBUTE_FACTORY, input);
   }
   
   /** Creates a TokenStream of the specified input using the given AttributeFactory */

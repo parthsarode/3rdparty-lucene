@@ -17,16 +17,14 @@ package org.apache.lucene.analysis.util;
  * limitations under the License.
  */
 
-import org.apache.lucene.analysis.core.StopFilter;
-import org.apache.lucene.util.IOUtils;
-import org.apache.lucene.util.Version;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
+import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -38,6 +36,10 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+
+import org.apache.lucene.analysis.core.StopFilter;
+import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.Version;
 
 /**
  * Abstract parent class for analysis factories {@link TokenizerFactory},
@@ -65,9 +67,17 @@ public abstract class AbstractAnalysisFactory {
    * Initialize this factory via a set of key-value pairs.
    */
   protected AbstractAnalysisFactory(Map<String,String> args) {
-    originalArgs = Collections.unmodifiableMap(new HashMap<String,String>(args));
+    originalArgs = Collections.unmodifiableMap(new HashMap<>(args));
     String version = get(args, LUCENE_MATCH_VERSION_PARAM);
-    luceneMatchVersion = version == null ? null : Version.parseLeniently(version);
+    if (version == null) {
+      luceneMatchVersion = null;
+    } else {
+      try {
+        luceneMatchVersion = Version.parseLeniently(version);
+      } catch (ParseException pe) {
+        throw new IllegalArgumentException(pe);
+      }
+    }
     args.remove(CLASS_NAME);  // consume the class arg
   }
   
@@ -202,7 +212,7 @@ public abstract class AbstractAnalysisFactory {
       Set<String> set = null;
       Matcher matcher = ITEM_PATTERN.matcher(s);
       if (matcher.find()) {
-        set = new HashSet<String>();
+        set = new HashSet<>();
         set.add(matcher.group(0));
         while (matcher.find()) {
           set.add(matcher.group(0));
@@ -252,7 +262,7 @@ public abstract class AbstractAnalysisFactory {
    * Returns the resource's lines (with content treated as UTF-8)
    */
   protected final List<String> getLines(ResourceLoader loader, String resource) throws IOException {
-    return WordlistLoader.getLines(loader.openResource(resource), IOUtils.CHARSET_UTF_8);
+    return WordlistLoader.getLines(loader.openResource(resource), StandardCharsets.UTF_8);
   }
 
   /** same as {@link #getWordSet(ResourceLoader, String, boolean)},
@@ -272,7 +282,7 @@ public abstract class AbstractAnalysisFactory {
         Reader reader = null;
         try {
           stream = loader.openResource(file.trim());
-          CharsetDecoder decoder = IOUtils.CHARSET_UTF_8.newDecoder()
+          CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
               .onMalformedInput(CodingErrorAction.REPORT)
               .onUnmappableCharacter(CodingErrorAction.REPORT);
           reader = new InputStreamReader(stream, decoder);
@@ -296,7 +306,7 @@ public abstract class AbstractAnalysisFactory {
     if (fileNames == null)
       return Collections.<String>emptyList();
 
-    List<String> result = new ArrayList<String>();
+    List<String> result = new ArrayList<>();
     for (String file : fileNames.split("(?<!\\\\),")) {
       result.add(file.replaceAll("\\\\(?=,)", ""));
     }

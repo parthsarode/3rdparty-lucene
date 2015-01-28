@@ -40,7 +40,7 @@ import java.util.HashSet;
 public class NearSpansUnordered extends Spans {
   private SpanNearQuery query;
 
-  private List<SpansCell> ordered = new ArrayList<SpansCell>();         // spans in query order
+  private List<SpansCell> ordered = new ArrayList<>();         // spans in query order
   private Spans[] subSpans;  
   private int slop;                               // from query
 
@@ -63,7 +63,7 @@ public class NearSpansUnordered extends Spans {
     @Override
     protected final boolean lessThan(SpansCell spans1, SpansCell spans2) {
       if (spans1.doc() == spans2.doc()) {
-        return NearSpansOrdered.docSpansOrdered(spans1, spans2);
+        return docSpansOrdered(spans1, spans2);
       } else {
         return spans1.doc() < spans2.doc();
       }
@@ -121,7 +121,7 @@ public class NearSpansUnordered extends Spans {
                     // TODO: Remove warning after API has been finalized
     @Override
     public Collection<byte[]> getPayload() throws IOException {
-      return new ArrayList<byte[]>(spans.getPayload());
+      return new ArrayList<>(spans.getPayload());
     }
 
     // TODO: Remove warning after API has been finalized
@@ -233,6 +233,18 @@ public class NearSpansUnordered extends Spans {
     return more && (atMatch() ||  next());
   }
 
+  /** Check whether two Spans in the same document are ordered with possible overlap.
+   * @return true iff spans1 starts before spans2
+   *              or the spans start at the same position,
+   *              and spans1 ends before spans2.
+   */
+  static final boolean docSpansOrdered(Spans spans1, Spans spans2) {
+    assert spans1.doc() == spans2.doc() : "doc1 " + spans1.doc() + " != doc2 " + spans2.doc();
+    int start1 = spans1.start();
+    int start2 = spans2.start();
+    return (start1 == start2) ? (spans1.end() < spans2.end()) : (start1 < start2);
+  }
+
   private SpansCell min() { return queue.top(); }
 
   @Override
@@ -250,7 +262,7 @@ public class NearSpansUnordered extends Spans {
    */
   @Override
   public Collection<byte[]> getPayload() throws IOException {
-    Set<byte[]> matchPayload = new HashSet<byte[]>();
+    Set<byte[]> matchPayload = new HashSet<>();
     for (SpansCell cell = first; cell != null; cell = cell.next) {
       if (cell.isPayloadAvailable()) {
         matchPayload.addAll(cell.getPayload());

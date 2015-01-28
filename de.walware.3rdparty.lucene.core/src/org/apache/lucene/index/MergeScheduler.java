@@ -29,26 +29,21 @@ import java.io.IOException;
  *  instance.</p>
  * @lucene.experimental
 */
-public abstract class MergeScheduler implements Closeable, Cloneable {
+public abstract class MergeScheduler implements Closeable {
 
   /** Sole constructor. (For invocation by subclass 
    *  constructors, typically implicit.) */
   protected MergeScheduler() {
   }
 
-  /** Run the merges provided by {@link IndexWriter#getNextMerge()}. */
-  public abstract void merge(IndexWriter writer) throws IOException;
+  /** Run the merges provided by {@link IndexWriter#getNextMerge()}.
+   * @param writer the {@link IndexWriter} to obtain the merges from.
+   * @param trigger the {@link MergeTrigger} that caused this merge to happen
+   * @param newMergesFound <code>true</code> iff any new merges were found by the caller otherwise <code>false</code>
+   * */
+  public abstract void merge(IndexWriter writer, MergeTrigger trigger, boolean newMergesFound) throws IOException;
 
   /** Close this MergeScheduler. */
   @Override
   public abstract void close() throws IOException;
-
-  @Override
-  public MergeScheduler clone() {
-    try {
-      return (MergeScheduler) super.clone();
-    } catch (CloneNotSupportedException e) {
-      throw new Error(e);
-    }
-  }
 }

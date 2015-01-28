@@ -55,56 +55,70 @@ public class SimpleFSDirectory extends FSDirectory {
   public IndexInput openInput(String name, IOContext context) throws IOException {
     ensureOpen();
     final File path = new File(directory, name);
-    return new SimpleFSIndexInput("SimpleFSIndexInput(path=\"" + path.getPath() + "\")", path, context);
-  }
-
-  @Override
-  public IndexInputSlicer createSlicer(final String name,
-      final IOContext context) throws IOException {
-    ensureOpen();
-    final File file = new File(getDirectory(), name);
-    final RandomAccessFile descriptor = new RandomAccessFile(file, "r");
-    return new IndexInputSlicer() {
-
-      @Override
-      public void close() throws IOException {
-        descriptor.close();
-      }
-
-      @Override
-      public IndexInput openSlice(String sliceDescription, long offset, long length) {
-        return new SimpleFSIndexInput("SimpleFSIndexInput(" + sliceDescription + " in path=\"" + file.getPath() + "\" slice=" + offset + ":" + (offset+length) + ")", descriptor, offset,
-            length, BufferedIndexInput.bufferSize(context));
-      }
-
-      @Override
-      public IndexInput openFullSlice() {
-        try {
-          return openSlice("full-slice", 0, descriptor.length());
-        } catch (IOException ex) {
-          throw new RuntimeException(ex);
-        }
-      }
-    };
+    RandomAccessFile raf = new RandomAccessFile(path, "r");
+    return new SimpleFSIndexInput("SimpleFSIndexInput(path=\"" + path.getPath() + "\")", raf, context);
   }
 
   /**
    * Reads bytes with {@link RandomAccessFile#seek(long)} followed by
    * {@link RandomAccessFile#read(byte[], int, int)}.  
    */
-  protected static class SimpleFSIndexInput extends FSIndexInput {
+  static final class SimpleFSIndexInput extends BufferedIndexInput {
     /**
      * The maximum chunk size is 8192 bytes, because {@link RandomAccessFile} mallocs
      * a native buffer outside of stack if the read buffer size is larger.
      */
     private static final int CHUNK_SIZE = 8192;
-  
-    public SimpleFSIndexInput(String resourceDesc, File path, IOContext context) throws IOException {
-      super(resourceDesc, path, context);
+    
+    /** the file channel we will read from */
+    protected final RandomAccessFile file;
+    /** is this instance a clone and hence does not own the file to close it */
+    boolean isClone = false;
+    /** start offset: non-zero in the slice case */
+    protected final long off;
+    /** end offset (start+length) */
+    protected final long end;
+    
+    public SimpleFSIndexInput(String resourceDesc, RandomAccessFile file, IOContext context) throws IOException {
+      super(resourceDesc, context);
+      this.file = file; 
+      this.off = 0L;
+      this.end = file.length();
     }
     
     public SimpleFSIndexInput(String resourceDesc, RandomAccessFile file, long off, long length, int bufferSize) {
-      super(resourceDesc, file, off, length, bufferSize);
+      super(resourceDesc, bufferSize);
+      this.file = file;
+      this.off = off;
+      this.end = off + length;
+      this.isClone = true;
+    }
+    
+    @Override
+    public void close() throws IOException {
+      if (!isClone) {
+        file.close();
+      }
+    }
+    
+    @Override
+    public SimpleFSIndexInput clone() {
+      SimpleFSIndexInput clone = (SimpleFSIndexInput)super.clone();
+      clone.isClone = true;
+      return clone;
+    }
+    
+    @Override
+    public IndexInput slice(String sliceDescription, long offset, long length) throws IOException {
+      if (offset < 0 || length < 0 || offset + length > this.length()) {
+        throw new IllegalArgumentException("slice() " + sliceDescription + " out of bounds: "  + this);
+      }
+      return new SimpleFSIndexInput(sliceDescription, file, off + offset, length, getBufferSize());
+    }
+
+    @Override
+    public final long length() {
+      return end - off;
     }
   
     /** IndexInput methods */
@@ -139,6 +153,10 @@ public class SimpleFSDirectory extends FSDirectory {
   
     @Override
     protected void seekInternal(long position) {
+    }
+    
+    boolean isFDValid() throws IOException {
+      return file.getFD().valid();
     }
   }
 }

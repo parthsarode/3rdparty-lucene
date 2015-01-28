@@ -21,13 +21,13 @@ import org.apache.lucene.analysis.standard.UAX29URLEmailTokenizer;
 import org.apache.lucene.analysis.standard.StandardTokenizerInterface;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 
+@Deprecated
 /**
  * This class implements UAX29URLEmailTokenizer, except with a bug 
  * (https://issues.apache.org/jira/browse/LUCENE-3358) where Han and Hiragana
  * characters would be split from combining characters:
  * @deprecated This class is only for exact backwards compatibility
  */
- @Deprecated
 %%
 
 %unicode 6.0
@@ -185,6 +185,10 @@ EMAIL = {EMAILlocalPart} "@" ({DomainNameStrict} | {EMAILbracketedHost})
   public final void getText(CharTermAttribute t) {
     t.copyBuffer(zzBuffer, zzStartRead, zzMarkedPos-zzStartRead);
   }
+
+   public final void setBufferSize(int numChars) {
+     throw new UnsupportedOperationException();
+   }
 %}
 
 %%

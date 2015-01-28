@@ -35,11 +35,11 @@ final class SortedIntSet {
   // O(N^2) linear ops to O(N log(N)) TreeMap
   private final static int TREE_MAP_CUTOVER = 30;
 
-  private final Map<Integer,Integer> map = new TreeMap<Integer,Integer>();
+  private final Map<Integer,Integer> map = new TreeMap<>();
 
   private boolean useTreeMap;
 
-  State state;
+  int state;
 
   public SortedIntSet(int capacity) {
     values = new int[capacity];
@@ -153,7 +153,7 @@ final class SortedIntSet {
     }
   }
 
-  public FrozenIntSet freeze(State state) {
+  public FrozenIntSet freeze(int state) {
     final int[] c = new int[upto];
     System.arraycopy(values, 0, c, 0, upto);
     return new FrozenIntSet(c, hashCode, state);
@@ -204,15 +204,15 @@ final class SortedIntSet {
   public final static class FrozenIntSet {
     final int[] values;
     final int hashCode;
-    final State state;
+    final int state;
 
-    public FrozenIntSet(int[] values, int hashCode, State state) {
+    public FrozenIntSet(int[] values, int hashCode, int state) {
       this.values = values;
       this.hashCode = hashCode;
       this.state = state;
     }
 
-    public FrozenIntSet(int num, State state) {
+    public FrozenIntSet(int num, int state) {
       this.values = new int[] {num};
       this.state = state;
       this.hashCode = 683+num;

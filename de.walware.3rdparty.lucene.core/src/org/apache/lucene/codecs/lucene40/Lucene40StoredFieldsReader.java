@@ -32,8 +32,10 @@ import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.RamUsageEstimator;
 
 import java.io.Closeable;
+import java.nio.charset.StandardCharsets;
 
 import static org.apache.lucene.codecs.lucene40.Lucene40StoredFieldsWriter.*;
 
@@ -46,6 +48,9 @@ import static org.apache.lucene.codecs.lucene40.Lucene40StoredFieldsWriter.*;
  * @lucene.internal
  */
 public final class Lucene40StoredFieldsReader extends StoredFieldsReader implements Cloneable, Closeable {
+
+  private static final long RAM_BYTES_USED = RamUsageEstimator.shallowSizeOfInstance(Lucene40StoredFieldsReader.class);
+
   private final FieldInfos fieldInfos;
   private final IndexInput fieldsStream;
   private final IndexInput indexStream;
@@ -193,7 +198,7 @@ public final class Lucene40StoredFieldsReader extends StoredFieldsReader impleme
       if ((bits & FIELD_IS_BINARY) != 0) {
         visitor.binaryField(info, bytes);
       } else {
-        visitor.stringField(info, new String(bytes, 0, bytes.length, IOUtils.CHARSET_UTF_8));
+        visitor.stringField(info, new String(bytes, 0, bytes.length, StandardCharsets.UTF_8));
       }
     }
   }
@@ -247,6 +252,9 @@ public final class Lucene40StoredFieldsReader extends StoredFieldsReader impleme
 
   @Override
   public long ramBytesUsed() {
-    return 0;
+    return RAM_BYTES_USED;
   }
+
+  @Override
+  public void checkIntegrity() throws IOException {}
 }
