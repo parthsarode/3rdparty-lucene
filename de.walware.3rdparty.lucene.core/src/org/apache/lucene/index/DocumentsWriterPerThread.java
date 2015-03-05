@@ -77,8 +77,9 @@ class DocumentsWriterPerThread {
       this.infoStream = infoStream;
     }
 
-    public void testPoint(String name) {
-      docWriter.testPoint(name);
+    // Only called by asserts
+    public boolean testPoint(String name) {
+      return docWriter.testPoint(name);
     }
 
     public void clear() {
@@ -201,25 +202,27 @@ class DocumentsWriterPerThread {
     return retval;
   }
   
-  final void testPoint(String message) {
+  final boolean testPoint(String message) {
     if (infoStream.isEnabled("TP")) {
       infoStream.message("TP", message);
     }
+    return true;
   }
 
   /** Anything that will add N docs to the index should reserve first to
    *  make sure it's allowed. */
-  private void reserveDoc() {
+  private void reserveOneDoc() {
     if (pendingNumDocs.incrementAndGet() > IndexWriter.getActualMaxDocs()) {
-      // Reserve failed
+      // Reserve failed: put the one doc back and throw exc:
       pendingNumDocs.decrementAndGet();
-      throw new IllegalStateException("number of documents in the index cannot exceed " + IndexWriter.getActualMaxDocs());
+      throw new IllegalArgumentException("number of documents in the index cannot exceed " + IndexWriter.getActualMaxDocs());
     }
   }
 
   public void updateDocument(Iterable<? extends IndexableField> doc, Analyzer analyzer, Term delTerm) throws IOException {
-    testPoint("DocumentsWriterPerThread addDocument start");
+    assert testPoint("DocumentsWriterPerThread addDocument start");
     assert deleteQueue != null;
+    reserveOneDoc();
     docState.doc = doc;
     docState.analyzer = analyzer;
     docState.docID = numDocsInRAM;
@@ -232,7 +235,6 @@ class DocumentsWriterPerThread {
     // document, so the counter will be "wrong" in that case, but
     // it's very hard to fix (we can't easily distinguish aborting
     // vs non-aborting exceptions):
-    reserveDoc();
     boolean success = false;
     try {
       try {
@@ -256,7 +258,7 @@ class DocumentsWriterPerThread {
   }
 
   public int updateDocuments(Iterable<? extends Iterable<? extends IndexableField>> docs, Analyzer analyzer, Term delTerm) throws IOException {
-    testPoint("DocumentsWriterPerThread addDocuments start");
+    assert testPoint("DocumentsWriterPerThread addDocuments start");
     assert deleteQueue != null;
     docState.analyzer = analyzer;
     if (INFO_VERBOSE && infoStream.isEnabled("DWPT")) {
@@ -272,7 +274,7 @@ class DocumentsWriterPerThread {
         // document, so the counter will be "wrong" in that case, but
         // it's very hard to fix (we can't easily distinguish aborting
         // vs non-aborting exceptions):
-        reserveDoc();
+        reserveOneDoc();
         docState.doc = doc;
         docState.docID = numDocsInRAM;
         docCount++;
