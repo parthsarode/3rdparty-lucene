@@ -12,7 +12,7 @@
 	
 	<groupId>de.walware.3rdparty-packaging</groupId>
 	<artifactId>de.walware.3rdparty.lucene</artifactId>
-	<version>4.10.3-SNAPSHOT</version>
+	<version>4.10.4-SNAPSHOT</version>
 	<packaging>eclipse-feature</packaging>
 	<name>Eclipse Feature: Apache Lucene</name>
 	

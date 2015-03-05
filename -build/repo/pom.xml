@@ -12,7 +12,7 @@
 	
 	<groupId>de.walware.3rdparty-packaging</groupId>
 	<artifactId>de.walware.3rdparty.lucene-repo</artifactId>
-	<version>4.10.3-SNAPSHOT</version>
+	<version>4.10.4-SNAPSHOT</version>
 	<packaging>eclipse-repository</packaging>
 	<name>WalWare.de - Apache Lucene</name>
 	

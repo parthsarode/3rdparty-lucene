@@ -2,7 +2,7 @@
 <feature
       id="de.walware.3rdparty.lucene"
       label="Apache Lucene"
-      version="4.10.3.qualifier"
+      version="4.10.4.qualifier"
       provider-name="WalWare.de"
       license-feature="de.walware.opensource.license"
       license-feature-version="1.0.0">
